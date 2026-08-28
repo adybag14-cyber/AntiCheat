@@ -23,5 +23,15 @@ or input identity drift unexpectedly.
 bounded non-elevated observation of the same driver hash while the Steam service
 and game were active. It contains no process command lines, launch tokens, kernel
 object pointers, raw handle rows, or ETL. It proves live driver/device identity
-and the measured cross-channel retry pattern; it explicitly leaves handle-access
-stripping unresolved.
+and the measured cross-channel retry pattern. Its handle-policy result is the
+historical non-elevated boundary and is superseded by the elevated artifact for
+current runtime conclusions.
+
+`randgrid-runtime-elevated-summary.json` is the privacy-reduced result of the
+three-stream elevated pass: Kernel Audit API Calls, an independent
+SystemTraceProvider `OB_HANDLE` trace, and 100 ms system handle-table snapshots.
+It publishes no transient PID, handle, kernel pointer, command line, or raw ETL.
+The aggregate records 2,208 exact same-caller/thread/time object correlations,
+41 persistent target handles with a 41/41 independent rundown overlap, and the
+strict remaining limit: selective requested-to-granted rewriting is not claimed
+without a handle-specific stored-mask join.

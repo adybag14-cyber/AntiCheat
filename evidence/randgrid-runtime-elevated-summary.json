@@ -1,0 +1,756 @@
+{
+  "schema_version": 1,
+  "capture": {
+    "date": "2026-08-28",
+    "administrator": true,
+    "requested_duration_seconds": 10,
+    "trace_length_seconds": 16,
+    "capture_phase": "complete",
+    "decoder_exit_codes": {
+      "audit_xperf_dump_exit_code": 0,
+      "audit_tracerpt_exit_code": 0,
+      "process_xperf_dump_exit_code": 0,
+      "process_tracerpt_exit_code": 0,
+      "ob_xperf_dump_exit_code": 0,
+      "ob_tracerpt_exit_code": 0
+    },
+    "method": "Two uniquely named user ETW sessions for Kernel Audit API Calls and Kernel Process, plus elevated SystemExtendedHandleInformation snapshots.",
+    "safety": "No handle was opened to cod.exe; no IOCTL, driver/service mutation, debugger, injection, or process termination was performed.",
+    "raw_artifacts_published": false
+  },
+  "driver": {
+    "service_name": "atvi-randgrid_sr",
+    "state": "Running",
+    "start_mode": "Manual",
+    "file_name": "randgrid.sys",
+    "file_size": 13130616,
+    "sha256": "4150290A810EBEBE9F9E6B5BD32C60299F9F34C3D2B6F02B89590ED49A6B895E",
+    "signature_status": "Valid",
+    "signer": "CN=Activision Publishing Inc, O=Activision Publishing Inc, L=SANTA MONICA, S=CALIFORNIA, C=US, SERIALNUMBER=2256184, OID.2.5.4.15=Private Organization, OID.1.3.6.1.4.1.311.60.2.1.2=Delaware, OID.1.3.6.1.4.1.311.60.2.1.3=US"
+  },
+  "trace": {
+    "start_utc": "2026-08-28T22:22:43.766942+00:00",
+    "length_seconds": 16,
+    "total_events": 172143,
+    "events_lost": 0,
+    "event_ids": {
+      "2": {
+        "count": 1,
+        "version": 1
+      },
+      "5": {
+        "count": 158810,
+        "version": 0
+      },
+      "6": {
+        "count": 13330,
+        "version": 0
+      }
+    }
+  },
+  "target_process": {
+    "name": "cod.exe",
+    "process_open_event_id": 5,
+    "thread_open_event_id": 6,
+    "process_open_count": 2218,
+    "external_process_open_count": 2218,
+    "process_open_success_count": 2218,
+    "process_open_failure_count": 0,
+    "thread_open_count": 133,
+    "external_thread_open_count": 0,
+    "thread_open_success_count": 133,
+    "thread_open_failure_count": 0,
+    "process_desired_access": [
+      {
+        "mask": "0x02000000",
+        "decimal": 33554432,
+        "rights": [
+          "maximum_allowed"
+        ],
+        "count": 1026
+      },
+      {
+        "mask": "0x00000400",
+        "decimal": 1024,
+        "rights": [
+          "query_information"
+        ],
+        "count": 1024
+      },
+      {
+        "mask": "0x00100000",
+        "decimal": 1048576,
+        "rights": [
+          "synchronize"
+        ],
+        "count": 63
+      },
+      {
+        "mask": "0x00000410",
+        "decimal": 1040,
+        "rights": [
+          "vm_read",
+          "query_information"
+        ],
+        "count": 43
+      },
+      {
+        "mask": "0x00001200",
+        "decimal": 4608,
+        "rights": [
+          "set_information",
+          "query_limited_information"
+        ],
+        "count": 32
+      },
+      {
+        "mask": "0x00001400",
+        "decimal": 5120,
+        "rights": [
+          "query_information",
+          "query_limited_information"
+        ],
+        "count": 16
+      },
+      {
+        "mask": "0x00001000",
+        "decimal": 4096,
+        "rights": [
+          "query_limited_information"
+        ],
+        "count": 14
+      }
+    ],
+    "thread_desired_access": [
+      {
+        "mask": "0x00000048",
+        "decimal": 72,
+        "rights": [
+          "get_context",
+          "query_information"
+        ],
+        "count": 133
+      }
+    ],
+    "process_open_callers": [
+      {
+        "caller_name": "Taskmgr.exe",
+        "event_count": 1072,
+        "successful_events": 1072,
+        "desired_access": [
+          {
+            "mask": "0x00000400",
+            "decimal": 1024,
+            "rights": [
+              "query_information"
+            ],
+            "count": 1024
+          },
+          {
+            "mask": "0x00001200",
+            "decimal": 4608,
+            "rights": [
+              "set_information",
+              "query_limited_information"
+            ],
+            "count": 32
+          },
+          {
+            "mask": "0x00001400",
+            "decimal": 5120,
+            "rights": [
+              "query_information",
+              "query_limited_information"
+            ],
+            "count": 16
+          }
+        ],
+        "return_codes": [
+          {
+            "code": "0x00000000",
+            "decimal": 0,
+            "count": 1072
+          }
+        ]
+      },
+      {
+        "caller_name": "System",
+        "event_count": 1026,
+        "successful_events": 1026,
+        "desired_access": [
+          {
+            "mask": "0x02000000",
+            "decimal": 33554432,
+            "rights": [
+              "maximum_allowed"
+            ],
+            "count": 1026
+          }
+        ],
+        "return_codes": [
+          {
+            "code": "0x00000000",
+            "decimal": 0,
+            "count": 1026
+          }
+        ]
+      },
+      {
+        "caller_name": "steam.exe",
+        "event_count": 63,
+        "successful_events": 63,
+        "desired_access": [
+          {
+            "mask": "0x00100000",
+            "decimal": 1048576,
+            "rights": [
+              "synchronize"
+            ],
+            "count": 63
+          }
+        ],
+        "return_codes": [
+          {
+            "code": "0x00000000",
+            "decimal": 0,
+            "count": 63
+          }
+        ]
+      },
+      {
+        "caller_name": "NahimicSvc32.exe",
+        "event_count": 16,
+        "successful_events": 16,
+        "desired_access": [
+          {
+            "mask": "0x00000410",
+            "decimal": 1040,
+            "rights": [
+              "vm_read",
+              "query_information"
+            ],
+            "count": 16
+          }
+        ],
+        "return_codes": [
+          {
+            "code": "0x00000000",
+            "decimal": 0,
+            "count": 16
+          }
+        ]
+      },
+      {
+        "caller_name": "NahimicSvc64.exe",
+        "event_count": 16,
+        "successful_events": 16,
+        "desired_access": [
+          {
+            "mask": "0x00000410",
+            "decimal": 1040,
+            "rights": [
+              "vm_read",
+              "query_information"
+            ],
+            "count": 16
+          }
+        ],
+        "return_codes": [
+          {
+            "code": "0x00000000",
+            "decimal": 0,
+            "count": 16
+          }
+        ]
+      },
+      {
+        "caller_name": "WmiPrvSE.exe",
+        "event_count": 11,
+        "successful_events": 11,
+        "desired_access": [
+          {
+            "mask": "0x00000410",
+            "decimal": 1040,
+            "rights": [
+              "vm_read",
+              "query_information"
+            ],
+            "count": 11
+          }
+        ],
+        "return_codes": [
+          {
+            "code": "0x00000000",
+            "decimal": 0,
+            "count": 11
+          }
+        ]
+      },
+      {
+        "caller_name": "Discord.exe",
+        "event_count": 10,
+        "successful_events": 10,
+        "desired_access": [
+          {
+            "mask": "0x00001000",
+            "decimal": 4096,
+            "rights": [
+              "query_limited_information"
+            ],
+            "count": 10
+          }
+        ],
+        "return_codes": [
+          {
+            "code": "0x00000000",
+            "decimal": 0,
+            "count": 10
+          }
+        ]
+      },
+      {
+        "caller_name": "explorer.exe",
+        "event_count": 2,
+        "successful_events": 2,
+        "desired_access": [
+          {
+            "mask": "0x00001000",
+            "decimal": 4096,
+            "rights": [
+              "query_limited_information"
+            ],
+            "count": 2
+          }
+        ],
+        "return_codes": [
+          {
+            "code": "0x00000000",
+            "decimal": 0,
+            "count": 2
+          }
+        ]
+      },
+      {
+        "caller_name": "MacriumService.exe",
+        "event_count": 2,
+        "successful_events": 2,
+        "desired_access": [
+          {
+            "mask": "0x00001000",
+            "decimal": 4096,
+            "rights": [
+              "query_limited_information"
+            ],
+            "count": 2
+          }
+        ],
+        "return_codes": [
+          {
+            "code": "0x00000000",
+            "decimal": 0,
+            "count": 2
+          }
+        ]
+      }
+    ],
+    "thread_open_callers": [
+      {
+        "caller_name": "cod.exe",
+        "event_count": 133,
+        "successful_events": 133,
+        "desired_access": [
+          {
+            "mask": "0x00000048",
+            "decimal": 72,
+            "rights": [
+              "get_context",
+              "query_information"
+            ],
+            "count": 133
+          }
+        ],
+        "return_codes": [
+          {
+            "code": "0x00000000",
+            "decimal": 0,
+            "count": 133
+          }
+        ]
+      }
+    ]
+  },
+  "process_handle_table": {
+    "process_object_type_index": 8,
+    "interval_seconds": 0.1,
+    "snapshot_count": 43,
+    "baseline_process_handle_count": 7161,
+    "final_process_handle_count": 7188,
+    "added_entries": 115,
+    "removed_entries": 88,
+    "changed_entries": 13,
+    "observed_pointer_rows": 7276,
+    "nonzero_pointer_rows": 7276,
+    "target_owned_process_handles_at_baseline": 16,
+    "target_owned_process_handles_at_end": 16,
+    "target_owned_note": "These are process-object handles owned by the target process; they are not necessarily handles referring to the target itself.",
+    "target_opener_handle_activity": "omitted: transient PIDs are local-only",
+    "kernel_object_pointers_visible": true,
+    "raw_metadata_published": false
+  },
+  "ob_handle_trace": {
+    "start_utc": "2026-08-28T22:22:43.861792+00:00",
+    "length_seconds": 16,
+    "total_events": 2487109,
+    "events_lost": 0,
+    "object_events": {
+      "TypeDCEnd": 74,
+      "HandleDCEnd": 316823,
+      "34": 5950,
+      "CloseHandle": 1043190,
+      "CreateHandle": 1038241
+    },
+    "parsed_process_handle_events": 580398
+  },
+  "exact_ob_correlation": {
+    "status": "exact-event-correlation",
+    "method": "Event 5 and HandleCreate were matched on caller PID, caller thread ID, and an aligned timestamp within 25 microseconds. The dominant Object value is then joined directly to SystemExtendedHandleInformation rows.",
+    "audit_trace_to_ob_trace_offset_us": 94850,
+    "matched_audit_events": 2208,
+    "unmatched_audit_events": 10,
+    "dominant_target_object_matches": 2208,
+    "dominant_target_object_ratio": 1.0,
+    "match_delta_us": {
+      "min": -3.0,
+      "median": 0.0,
+      "p95_absolute": 1.0,
+      "max": 0.0
+    },
+    "target_object_alias": "cod-process-object",
+    "target_object_pointer_published": false,
+    "target_handle_events": {
+      "create_count": 2250,
+      "close_count": 2250,
+      "paired_lifetime_count": 2250,
+      "lifetime_us": {
+        "median": 4.0,
+        "p95": 11.0,
+        "max": 127.0
+      }
+    },
+    "persistent_handles": {
+      "snapshot_baseline_count": 41,
+      "snapshot_final_count": 41,
+      "ob_rundown_count": 41,
+      "final_snapshot_rundown_tuple_overlap": 41,
+      "baseline_distinct_owners": 17,
+      "baseline_owners": [
+        {
+          "owner_name": "System",
+          "handle_count": 14,
+          "granted_access": [
+            {
+              "mask": "0x0000102A",
+              "decimal": 4138,
+              "rights": [
+                "create_thread",
+                "vm_operation",
+                "vm_write",
+                "query_limited_information"
+              ],
+              "count": 13
+            },
+            {
+              "mask": "0x001FFFFF",
+              "decimal": 2097151,
+              "rights": [
+                "terminate",
+                "create_thread",
+                "set_session_id",
+                "vm_operation",
+                "vm_read",
+                "vm_write",
+                "duplicate_handle",
+                "create_process",
+                "set_quota",
+                "set_information",
+                "query_information",
+                "suspend_resume",
+                "query_limited_information",
+                "set_limited_information",
+                "delete",
+                "read_control",
+                "write_dac",
+                "write_owner",
+                "synchronize"
+              ],
+              "count": 1
+            }
+          ]
+        },
+        {
+          "owner_name": "audiodg.exe",
+          "handle_count": 8,
+          "granted_access": [
+            {
+              "mask": "0x00003000",
+              "decimal": 12288,
+              "rights": [
+                "query_limited_information",
+                "set_limited_information"
+              ],
+              "count": 6
+            },
+            {
+              "mask": "0x00002000",
+              "decimal": 8192,
+              "rights": [
+                "set_limited_information"
+              ],
+              "count": 2
+            }
+          ]
+        },
+        {
+          "owner_name": "NahimicSvc64.exe",
+          "handle_count": 5,
+          "granted_access": [
+            {
+              "mask": "0x00001000",
+              "decimal": 4096,
+              "rights": [
+                "query_limited_information"
+              ],
+              "count": 5
+            }
+          ]
+        },
+        {
+          "owner_name": "svchost.exe",
+          "handle_count": 4,
+          "granted_access": [
+            {
+              "mask": "0x00001478",
+              "decimal": 5240,
+              "rights": [
+                "vm_operation",
+                "vm_read",
+                "vm_write",
+                "duplicate_handle",
+                "query_information",
+                "query_limited_information"
+              ],
+              "count": 1
+            },
+            {
+              "mask": "0x00100000",
+              "decimal": 1048576,
+              "rights": [
+                "synchronize"
+              ],
+              "count": 1
+            },
+            {
+              "mask": "0x00101000",
+              "decimal": 1052672,
+              "rights": [
+                "query_limited_information",
+                "synchronize"
+              ],
+              "count": 1
+            },
+            {
+              "mask": "0x00103200",
+              "decimal": 1061376,
+              "rights": [
+                "set_information",
+                "query_limited_information",
+                "set_limited_information",
+                "synchronize"
+              ],
+              "count": 1
+            }
+          ]
+        },
+        {
+          "owner_name": "csrss.exe",
+          "handle_count": 1,
+          "granted_access": [
+            {
+              "mask": "0x001FFFFF",
+              "decimal": 2097151,
+              "rights": [
+                "terminate",
+                "create_thread",
+                "set_session_id",
+                "vm_operation",
+                "vm_read",
+                "vm_write",
+                "duplicate_handle",
+                "create_process",
+                "set_quota",
+                "set_information",
+                "query_information",
+                "suspend_resume",
+                "query_limited_information",
+                "set_limited_information",
+                "delete",
+                "read_control",
+                "write_dac",
+                "write_owner",
+                "synchronize"
+              ],
+              "count": 1
+            }
+          ]
+        },
+        {
+          "owner_name": "GameInputRedistService.exe",
+          "handle_count": 1,
+          "granted_access": [
+            {
+              "mask": "0x00101000",
+              "decimal": 1052672,
+              "rights": [
+                "query_limited_information",
+                "synchronize"
+              ],
+              "count": 1
+            }
+          ]
+        },
+        {
+          "owner_name": "KillerNetworkService.exe",
+          "handle_count": 1,
+          "granted_access": [
+            {
+              "mask": "0x00001000",
+              "decimal": 4096,
+              "rights": [
+                "query_limited_information"
+              ],
+              "count": 1
+            }
+          ]
+        },
+        {
+          "owner_name": "lsass.exe",
+          "handle_count": 1,
+          "granted_access": [
+            {
+              "mask": "0x00001478",
+              "decimal": 5240,
+              "rights": [
+                "vm_operation",
+                "vm_read",
+                "vm_write",
+                "duplicate_handle",
+                "query_information",
+                "query_limited_information"
+              ],
+              "count": 1
+            }
+          ]
+        },
+        {
+          "owner_name": "NahimicSvc32.exe",
+          "handle_count": 1,
+          "granted_access": [
+            {
+              "mask": "0x00001000",
+              "decimal": 4096,
+              "rights": [
+                "query_limited_information"
+              ],
+              "count": 1
+            }
+          ]
+        },
+        {
+          "owner_name": "nvcontainer.exe",
+          "handle_count": 1,
+          "granted_access": [
+            {
+              "mask": "0x00100000",
+              "decimal": 1048576,
+              "rights": [
+                "synchronize"
+              ],
+              "count": 1
+            }
+          ]
+        },
+        {
+          "owner_name": "PresentMon-x64.exe",
+          "handle_count": 1,
+          "granted_access": [
+            {
+              "mask": "0x00001000",
+              "decimal": 4096,
+              "rights": [
+                "query_limited_information"
+              ],
+              "count": 1
+            }
+          ]
+        },
+        {
+          "owner_name": "RadeonSoftware.exe",
+          "handle_count": 1,
+          "granted_access": [
+            {
+              "mask": "0x00101000",
+              "decimal": 1052672,
+              "rights": [
+                "query_limited_information",
+                "synchronize"
+              ],
+              "count": 1
+            }
+          ]
+        },
+        {
+          "owner_name": "steam.exe",
+          "handle_count": 1,
+          "granted_access": [
+            {
+              "mask": "0x00101400",
+              "decimal": 1053696,
+              "rights": [
+                "query_information",
+                "query_limited_information",
+                "synchronize"
+              ],
+              "count": 1
+            }
+          ]
+        },
+        {
+          "owner_name": "warp-svc.exe",
+          "handle_count": 1,
+          "granted_access": [
+            {
+              "mask": "0x00001000",
+              "decimal": 4096,
+              "rights": [
+                "query_limited_information"
+              ],
+              "count": 1
+            }
+          ]
+        }
+      ]
+    },
+    "exact_requested_granted_pairs": [],
+    "exact_requested_granted_pair_count": 0,
+    "selective_filtering_assessment": "The target object and its persistent handles are now identified directly. An exact requested-to-granted claim is made only for rows listed in exact_requested_granted_pairs; owner-level request/persistent-mask patterns remain corroboration, not a handle-specific causal join."
+  },
+  "conclusion": {
+    "object_callback_registration_proved_statically": true,
+    "naturally_occurring_process_open_requests_observed": true,
+    "target_process_object_identified_at_runtime": true,
+    "universal_literal_handle_hiding_supported": false,
+    "runtime_access_stripping_proved": false,
+    "runtime_access_stripping_disproved": false,
+    "reason": "Exact audit/OB correlation identifies the target process object and exposes external handles, contradicting universal literal hiding. Selective callback rewriting is proved only if an exact returned-handle snapshot shows a requested/granted change; owner-level patterns alone remain corroboration."
+  }
+}

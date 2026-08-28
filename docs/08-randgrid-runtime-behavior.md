@@ -1,67 +1,79 @@
-# Randgrid.sys — Runtime Behavior and Handle-Policy Evidence
+# Randgrid.sys — Runtime Handle Behavior
 
 **Date:** 2026-08-28
 
-**Static input SHA-256:** `4150290A810EBEBE9F9E6B5BD32C60299F9F34C3D2B6F02B89590ED49A6B895E`
+**Static/runtime SHA-256:**
+`4150290A810EBEBE9F9E6B5BD32C60299F9F34C3D2B6F02B89590ED49A6B895E`
 
-**Scope:** bounded, read-only observation of the running Steam driver and game
+**Scope:** bounded, elevated, read-only observation of the running Steam driver
+and `cod.exe`
 
 **Safety boundary:** no driver/service/device mutation, no IOCTL, no debugger,
-no injection, no process-memory operation, and no handle opened to `cod.exe`
+no injection, no process-memory operation, no process termination, and no
+handle opened to `cod.exe`
 
 ---
 
-## 1. Result
+## 1. Corrected result
 
-The runtime pass proves several important parts of the static model:
+The runtime work now separates three claims that earlier drafts blurred:
 
-- the running `atvi-randgrid_sr` service points to the exact driver previously
-  analyzed statically;
-- the driver is active while `cod.exe`, the bootstrapper, broker service, and
-  crash handlers are active;
-- the live DOS-device link `Randgrid` resolves to `\Device\Randgrid`;
-- the Steam and Microsoft Store driver images are byte-identical and both embed
-  `\Device\Randgrid` and `\DosDevices\Randgrid`;
-- the stopped Store service repeatedly fails with `ERROR_ALREADY_EXISTS` while
-  the Steam service is running, in approximately 5.55-second retry bursts;
-- the observed component topology remained stable through a bounded passive
-  metrics/handle-table capture.
+| Claim | Result | Evidence |
+|---|---|---|
+| Randgrid registers an object callback | Proved statically | Exact `ObRegisterCallbacks` call at VA `0x140AB309D` |
+| All handles to the game are hidden | Contradicted at runtime | The exact game process object had 41 visible persistent handles across 17 owners |
+| Randgrid selectively rewrites requested access | Strongly suggested, not causally proved | Request and persistent-mask patterns differ, but no transient returned handle survived long enough for a handle-specific granted-mask snapshot |
+| Randgrid outright denies process opens | Not observed in this window | All 2,218 game-target process-open events returned success |
 
-The runtime pass does **not** yet prove or disprove object-callback handle-access
-stripping. The necessary privileged providers were not active, Windows redacted
-kernel object pointers from the non-elevated handle table, and the requested UAC
-elevation was cancelled. No privileged trace session started.
+The precise conclusion is:
 
-The precise statement therefore remains:
+> Randgrid does not universally hide the game's process object or all handles to
+> it. The observed owner/mask distribution is consistent with selective
+> allowlisting or access reduction, but this capture does not prove a particular
+> callback rewrite for a particular returned handle.
 
-> Randgrid's object callback registration is proved statically. Runtime handle
-> hiding/access stripping remains unresolved—not absent, and not established.
+This corrects the earlier provisional Task Manager-only temporal inference. The
+final object identity comes from same-caller, same-thread, near-simultaneous
+correlation between audit event 5 and kernel `HandleCreate`, then an independent
+join to the system handle table and kernel handle rundown.
 
 ---
 
-## 2. Method and evidence boundary
+## 2. Evidence authority and privacy boundary
 
-The successful non-elevated pass used only:
+The published aggregate is
+[`evidence/randgrid-runtime-elevated-summary.json`](../evidence/randgrid-runtime-elevated-summary.json).
+It contains counts, process names, access masks, timing statistics, and explicit
+limitations. It contains no:
 
-- `Win32_SystemDriver` and `Win32_Process` read-only queries;
-- file size, SHA-256, and Authenticode verification;
-- `QueryDosDeviceW("Randgrid")`;
-- bounded `Get-Process`/`Win32_Process` metric samples;
-- `NtQuerySystemInformation(SystemExtendedHandleInformation)` snapshots;
-- read-only System and Code Integrity event-log queries;
-- read-only inspection of currently active ETW sessions.
+- raw ETL or decoded CSV/dump;
+- kernel object address or raw handle value;
+- transient PID;
+- command line, launch token, or user path;
+- proprietary game or driver bytes.
 
-Raw handle metadata, process metrics, and any future ETL remain under the
-Git-ignored `local-analysis/` directory. Only the privacy-reduced aggregate in
-`evidence/randgrid-runtime-passive-summary.json` is published.
+The raw local corpus remains under Git-ignored `local-analysis/`. Its final
+three-stream pass contained:
 
-No command line or launch token from the running game is published.
+| Stream | Total events | Lost events |
+|---|---:|---:|
+| Kernel Audit API Calls | 172,143 | 0 |
+| Independent SystemTraceProvider / OB handle | 2,487,109 | 0 |
+| Process-handle snapshots | 43 snapshots at 100 ms requested interval | n/a |
+
+The requested active window was 10 seconds. Session startup, shutdown, and
+kernel rundown made each ETL span 16 seconds. The short active window was
+deliberate: OB tracing emitted about 2.49 million events and already provided
+complete target correlation without a wasteful longer duplicate.
+
+All six local decoders—Xperf and Tracerpt for audit, process, and OB streams—
+returned exit code `0`.
 
 ---
 
-## 3. Live driver identity
+## 3. Live driver and device identity
 
-At capture time:
+At capture time, the running service was:
 
 | Property | Value |
 |---|---|
@@ -73,148 +85,211 @@ At capture time:
 | Authenticode | Valid |
 | Signer | Activision Publishing Inc |
 
-The hash is identical to the static-analysis input in documents 06 and 07. This
-closes the source-versus-runtime identity boundary: the driver being observed is
-the driver whose import/callback call sites were mapped.
+The hash is identical to the input used for documents 06 and 07. This closes the
+source-versus-runtime identity boundary: the running driver is the image whose
+imports and callback-registration call sites were analyzed.
 
----
-
-## 4. Live device publication
-
-`QueryDosDeviceW("Randgrid")` returned:
+The earlier passive pass also established:
 
 ```text
-\Device\Randgrid
+QueryDosDeviceW("Randgrid") -> \Device\Randgrid
 ```
 
-with Win32 last error `0`. This proves that the live DOS-device link exists while
-the Steam driver is running. It backs the static combination of:
-
-- embedded `\Device\Randgrid`;
-- embedded `\DosDevices\Randgrid`;
-- one exact `IoCreateDevice` call;
-- one exact `IoCreateSymbolicLink` call;
-- corresponding teardown calls.
-
-The runtime query does not open the device and sends no IOCTL.
+That query did not open the device or send an IOCTL.
 
 ---
 
-## 5. Cross-channel collision behavior
+## 4. Exact target-object correlation
 
-The driver variants were:
+The final pass recorded three independent sources:
 
-| Service | State | Size | SHA-256 relationship | Embedded Randgrid device names |
-|---|---|---:|---|---|
-| `atvi-randgrid_sr` | Running | 13,130,616 | Static/runtime authority hash | Yes |
-| `atvi-randgrid_msstore` | Stopped | 13,130,616 | Byte-identical to Steam | Yes |
-| `atvi-randgrid` | Stopped | 2,981,352 | Different Battle.net image | No exact two-name pair |
+1. `Microsoft-Windows-Kernel-Audit-API-Calls` event 5, exposing caller PID,
+   caller thread, target PID, `DesiredAccess`, and `ReturnCode`;
+2. kernel `HandleCreate`/`HandleClose`, exposing caller PID/thread, returned
+   handle, object, and object type;
+3. elevated `SystemExtendedHandleInformation`, exposing owner, handle, object,
+   and stored granted-access mask.
 
-The System event log contains 42 event-7000 failures for
-`atvi-randgrid_msstore` from 12:17:50 through 12:27:54 local time. The reported
-error is:
+Microsoft documents the object-event fields in
+[`ObHandleEvent`](https://learn.microsoft.com/en-us/windows/win32/etw/obhandleevent),
+the `PERF_OB_HANDLE` enable path in
+[`ObTrace`](https://learn.microsoft.com/en-us/windows/win32/etw/obtrace), and
+the custom-name, non-`NT Kernel Logger` design in
+[`Configuring and Starting a SystemTraceProvider Session`](https://learn.microsoft.com/en-us/windows/win32/etw/configuring-and-starting-a-systemtraceprovider-session).
+
+The audit and OB sessions started 94,850 microseconds apart. After shifting OB
+timestamps onto the audit timeline, the analyzer matched on:
+
+- caller process;
+- caller thread;
+- process-object type;
+- timestamp within 25 microseconds.
+
+Results:
+
+| Metric | Value |
+|---|---:|
+| Game-target process-open audit events | 2,218 |
+| Matched to `HandleCreate` | 2,208 |
+| Unmatched | 10 |
+| Matches converging on one object | 2,208 / 2,208 |
+| Dominant-object ratio | 1.0000 |
+| Median timestamp delta | 0 μs |
+| 95th-percentile absolute delta | 1 μs |
+| Observed delta range | -3 to 0 μs |
+
+This is no longer the weak statement “a Task Manager handle appeared in the
+same 500 ms interval.” The same object is recovered independently from 2,208
+same-thread event pairs and is then used as the exact key for handle-table and
+rundown joins. The pointer itself is intentionally not published.
+
+---
+
+## 5. What actually opened the game
+
+All 2,218 process-open audit events targeting the game returned `0`. All were
+external in this window. The most active callers were:
+
+| Caller | Events | Principal requested masks |
+|---|---:|---|
+| `Taskmgr.exe` | 1,072 | `0x400` x1,024; `0x1200` x32; `0x1400` x16 |
+| `System` | 1,026 | `MAXIMUM_ALLOWED` x1,026 |
+| `steam.exe` | 63 | `SYNCHRONIZE` x63 |
+| `NahimicSvc32.exe` | 16 | `VM_READ \| QUERY_INFORMATION` x16 |
+| `NahimicSvc64.exe` | 16 | `VM_READ \| QUERY_INFORMATION` x16 |
+| `WmiPrvSE.exe` | 11 | `VM_READ \| QUERY_INFORMATION` x11 |
+| `Discord.exe` | 10 | `QUERY_LIMITED_INFORMATION` x10 |
+| `explorer.exe` | 2 | `QUERY_LIMITED_INFORMATION` x2 |
+| `MacriumService.exe` | 2 | `QUERY_LIMITED_INFORMATION` x2 |
+
+The trace also contained 133 thread-open events targeting the game. Every one
+came from `cod.exe` itself; no external thread-open caller appeared in the
+bounded window. Those 133 calls also returned success.
+
+`ReturnCode == 0` proves that the open operation completed successfully. It does
+not prove that the returned handle retained every requested bit: an object
+pre-operation callback can reduce desired access and still allow handle
+creation.
+
+---
+
+## 6. Handle lifetimes explain the earlier sampling failure
+
+For the exactly identified game object, the OB stream recorded:
+
+| Metric | Value |
+|---|---:|
+| `HandleCreate` | 2,250 |
+| `HandleClose` | 2,250 |
+| Create/close lifetime pairs | 2,250 |
+| Median lifetime | 4 μs |
+| 95th-percentile lifetime | 11 μs |
+| Maximum lifetime | 127 μs |
+
+The final sampler queried at 100 ms intervals—approximately 787 times slower
+than the longest transient handle and 25,000 times slower than the median.
+Therefore it was expected to miss all returned transient handles. This is why
+the analyzer reports zero exact requested-to-granted pairs: not because the
+object identity is unknown, but because the newly returned handles closed long
+before a system handle-table snapshot could observe their stored masks.
+
+---
+
+## 7. Persistent handles: literal hiding is false
+
+The elevated handle snapshot found 41 persistent handles whose object field
+equalled the exactly correlated game object. The independent kernel
+`Handle-DCEnd` rundown also reported 41, and every one of the 41
+`(owner, handle)` tuples overlapped.
+
+This dual-source equality is the strongest literal-hiding result:
 
 ```text
-Cannot create a file when that file already exists.
+Snapshot persistent target handles: 41
+Kernel rundown target handles:       41
+Exact owner/handle overlap:           41
+Distinct owners:                      17
 ```
 
-Interval analysis:
+Selected owner/mask results:
 
-| Statistic | Value |
-|---|---:|
-| Intervals | 41 |
-| Median | 5.5499 s |
-| 75th percentile | 5.5737 s |
-| 90th percentile | 22.4783 s |
-| Intervals at or below 7 s | 36 |
-| Intervals over 30 s | 4 |
-| Longer gaps | 22.4783, 40.9301, 69.2238, 145.3072, 146.5070 s |
+| Owner | Handles | Stored granted masks |
+|---|---:|---|
+| `System` | 14 | thirteen `0x102A`; one `0x1FFFFF` |
+| `audiodg.exe` | 8 | six `0x3000`; two `0x2000` |
+| `NahimicSvc64.exe` | 5 | five `0x1000` |
+| `svchost.exe` | 4 | `0x1478`, `0x100000`, `0x101000`, `0x103200` |
+| `csrss.exe` | 1 | `0x1FFFFF` |
+| `lsass.exe` | 1 | `0x1478` |
+| `NahimicSvc32.exe` | 1 | `0x1000` |
+| `steam.exe` | 1 | `0x101400` |
+| `nvcontainer.exe` | 1 | `0x100000` |
+| `warp-svc.exe` | 1 | `0x1000` |
+| `PresentMon-x64.exe` | 1 | `0x1000` |
 
-The pattern is a burst of roughly 5.55-second retries with longer backoff gaps.
-Because the Store and Steam images are byte-identical and publish the same
-Randgrid names, the live DOS-device/object namespace is a plausible collision
-surface. Event 7000 does not name the exact object, so that final association is
-labelled an inference rather than direct proof.
+The complete privacy-reduced owner table is in the JSON evidence artifact.
 
----
-
-## 6. Bounded component and process behavior
-
-The 30 requested process samples spanned 34.16 seconds because each read-only WMI
-sample adds overhead. The active component set remained unchanged:
-
-- `CODBrokerService.exe`;
-- `bootstrapper.exe`;
-- `cod.exe`;
-- two `codCrashHandler.exe` instances.
-
-Aggregate `cod.exe` observations:
-
-| Metric | Result |
-|---|---:|
-| Threads | 133 throughout |
-| Handles | 51,540 → 51,613 |
-| Working set | 2,484,465,664–2,507,337,728 bytes |
-| Private memory | 11,362,131,968–11,395,137,536 bytes |
-| CPU time added | 53.296875 s |
-| Mean logical cores consumed | 1.5604 |
-| Read operations | +6,405 |
-| Write operations | +6,272 |
-| Read bytes | +196,611,438 |
-| Write bytes | +83,632 |
-
-The simultaneous process-handle metadata collector completed 45 snapshots and
-observed 164 additions, 204 removals, and two changed entries, ending with 7,004
-process-type handles system-wide.
-
-These measurements establish that the live topology was stable and active during
-the observation window. They do not identify which calls came from Randgrid or
-prove execution of the statically mapped callback/CI/CNG paths.
+The game object is therefore not absent from privileged handle enumeration, and
+external processes do hold handles to it. “Randgrid hides all handles” is not a
+defensible description of the observed runtime behavior.
 
 ---
 
-## 7. Why the handle-policy question remains open
+## 8. Evidence for selective policy—and its limit
 
-Three different evidence layers are required:
+The distribution is not random-looking:
 
-1. **Requested access:** the caller's process/thread-open request.
-2. **Callback result:** the access mask after any registered object callback.
-3. **Granted access:** the mask stored in the resulting handle-table entry.
+- system/security processes retain broad masks, including `0x1FFFFF` and
+  `0x1478`;
+- Steam retains query and synchronize rights;
+- graphics/audio/monitoring services often retain only limited-query,
+  limited-set, or synchronize rights;
+- Nahimic made 32 successful requests for
+  `VM_READ | QUERY_INFORMATION` (`0x410`) during the trace, while all six of its
+  persistent handles to the game stored only `QUERY_LIMITED_INFORMATION`
+  (`0x1000`).
 
-The non-elevated capture had none of the privileged correlation identifiers:
+That pattern is consistent with a selective access policy or allowlist, and it
+is materially stronger than the static import alone. It is still not a causal
+proof that Randgrid transformed `0x410` into `0x1000`:
 
-- Windows returned `0` for kernel object pointers in
-  `SystemExtendedHandleInformation`.
-- No `Microsoft-Windows-Kernel-Audit-API-Calls` session was active.
-- The existing `NT Kernel Logger` had `LOADER` only, not `OB_HANDLE`.
-- No handle was deliberately opened to `cod.exe`.
+- the 32 newly returned Nahimic handles lived for only microseconds and closed
+  before a 100 ms snapshot;
+- the six persistent Nahimic handles predated the observed transient calls;
+- event 5 and `HandleCreate` identify a request and returned handle but do not
+  include the stored granted-access mask;
+- the handle table includes the stored mask but only for a handle still alive at
+  snapshot time.
 
-Microsoft's `ObHandleEvent` ETW event exposes the handle, object pointer, object
-name, and object type—but not the granted access mask. Therefore OB-handle events
-alone cannot prove access stripping. They must be correlated with a handle-table
-snapshot and an access-request source. See Microsoft's
-[`ObHandleEvent`](https://learn.microsoft.com/en-us/windows/win32/etw/obhandleevent)
-and [`ObTrace`](https://learn.microsoft.com/en-us/windows/win32/etw/obtrace)
-documentation.
-
-Microsoft's own KrabsETW example uses event 5 from
-`Microsoft-Windows-Kernel-Audit-API-Calls` for `PsOpenProcess`, including
-`TargetProcessId`, `DesiredAccess`, and `ReturnCode`, and explicitly requires
-administrator rights for Microsoft-Windows-Kernel-* providers. See the
-[`UserTrace007_StackTrace` example](https://github.com/microsoft/krabsetw/blob/master/examples/ManagedExamples/UserTrace007_StackTrace.cs).
-
-The attempted elevation was cancelled by the user. The launcher remained waiting
-at UAC, no elevated child appeared, no `RandgridAudit-*` session existed, and no
-trace status was written. The request then returned Windows' explicit
-“operation was canceled by the user” result. It was not retried.
+Accordingly, the evidence supports “selective filtering is plausible and
+runtime-corroborated,” not “this callback definitely removed these exact bits
+from this exact request.”
 
 ---
 
-## 8. Prepared elevated passive capture
+## 9. Cross-channel collision behavior
 
-The repository now includes a bounded collector that can be run manually from an
-Administrator PowerShell while the game and Steam Randgrid service are already
-active:
+The earlier passive pass remains valid:
+
+| Service | State | Size | Relationship |
+|---|---|---:|---|
+| `atvi-randgrid_sr` | Running | 13,130,616 | Runtime/static authority image |
+| `atvi-randgrid_msstore` | Stopped | 13,130,616 | Byte-identical to Steam image |
+| `atvi-randgrid` | Stopped | 2,981,352 | Different Battle.net image |
+
+The System event log contained 42 event-7000 failures for the Store service.
+Most intervals formed approximately 5.55-second retry bursts, and Windows
+reported “Cannot create a file when that file already exists.” The byte-identical
+Steam and Store images embed the same device and DOS-link names, so a live object
+namespace collision is plausible. The event does not identify the exact object;
+that last association remains an inference.
+
+---
+
+## 10. Reproduction and safety properties
+
+From an Administrator PowerShell while the game and Steam driver are already
+running:
 
 ```powershell
 $python = (Get-Command python.exe).Source
@@ -223,51 +298,48 @@ $stamp = [DateTimeOffset]::UtcNow.ToString('yyyyMMdd-HHmmss')
 & .\scripts\runtime\capture_randgrid_runtime.ps1 `
   -OutputDirectory ".\local-analysis\runtime-elevated-$stamp" `
   -PythonPath $python `
-  -DurationSeconds 60
+  -DurationSeconds 10 `
+  -HandleIntervalSeconds 0.1
 ```
 
 The collector:
 
-- verifies elevation, the active `cod.exe`, and the running Steam driver;
-- verifies the driver hash and signature;
-- starts one uniquely named user ETW session for
-  `Microsoft-Windows-Kernel-Audit-API-Calls` and
-  `Microsoft-Windows-Kernel-Process` with stack capture;
-- runs passive process-handle snapshots that open only the collector's own
-  query-limited self handle;
-- monitors that the target and driver remain active;
-- stops only its exact ETW session;
-- locally decodes the ETL with Xperf and Tracerpt;
-- writes fail-closed status JSON;
-- never opens `cod.exe`, never touches the Randgrid device, and never changes a
-  service or driver.
+- verifies elevation, the target process, driver state, hash, and signature;
+- starts two unique Logman user-provider sessions;
+- starts one unique Tracelog `-systemlogger -independent` session for
+  `PROC_THREAD+LOADER+OB_HANDLE`;
+- leaves every pre-existing ETW session untouched;
+- opens only a query-limited handle to the collector itself, solely to discover
+  the process-object type index;
+- monitors target/driver liveness once per second;
+- stops only its three exact session names;
+- decodes all three ETLs locally and fails closed if any decoder returns nonzero;
+- never opens the game, sends an IOCTL, changes a service, or terminates a
+  process.
 
-The capture can reveal naturally occurring process/thread-open requests and
-their call stacks. Definitive requested-versus-granted comparison still depends
-on a correlatable persistent handle. Creating a controlled high-access handle to
-the live game would cross the current no-process-attachment boundary and was not
-performed.
+Two rejected Xperf OB-session attempts failed before recording with
+`0x800703EC` and were cleaned up immediately. They left no session or helper
+process. The successful path uses Microsoft's documented independent
+SystemTraceProvider mechanism via Tracelog.
+
+The raw OB stream is high-volume. A 10-second requested window is the recommended
+default; extend it only when the question genuinely requires more events.
 
 ---
 
-## 9. Current conclusion
-
-Runtime evidence now backs these statements:
-
-- the exact statically analyzed Randgrid image is running;
-- its live DOS-device link is published;
-- the game/broker/bootstrapper/crash-handler topology is active;
-- byte-identical Steam and Store images collide during Store start attempts in a
-  measurable retry/backoff pattern.
-
-Runtime evidence does not yet back “handle hiding.” The most accurate status is:
+## 11. Final claim boundary
 
 ```text
-Object callback registered: proved.
-Live Randgrid device published: proved.
-Process/thread access stripping: unresolved.
-Reason: privileged requested/object/granted-access correlation was not authorized.
+Object callback registration:                  proved statically
+Exact running game process object:             proved by audit/OB correlation
+Persistent external handles to that object:   proved by snapshot + rundown
+Universal literal handle hiding:              contradicted
+Outright process-open denial in this window:  not observed
+Selective access filtering/allowlisting:      strongly suggested
+One exact requested -> stored-mask rewrite:   not captured
 ```
 
-That boundary is evidence-driven, not a lack of static depth and not an inference
-that the callback is inert.
+The remaining uncertainty is now narrow and explicit. It is no longer “we do
+not know which process object is the game” or “Windows redacted every pointer.”
+It is specifically the lack of a shared granted-mask field for the extremely
+short-lived returned handles.

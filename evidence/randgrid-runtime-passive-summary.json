@@ -136,6 +136,8 @@
     "interpretation": "No matching event-log entry was observed; this does not prove the static CI call sites were not executed."
   },
   "handle_policy_result": {
+    "scope": "Historical non-elevated capture; current runtime conclusions are in randgrid-runtime-elevated-summary.json.",
+    "superseded_by": "evidence/randgrid-runtime-elevated-summary.json",
     "static_registration": true,
     "runtime_access_stripping_proved": false,
     "runtime_access_stripping_disproved": false,

@@ -7,7 +7,10 @@ param(
     [string] $PythonPath,
 
     [ValidateRange(10, 300)]
-    [int] $DurationSeconds = 60,
+    [int] $DurationSeconds = 10,
+
+    [ValidateRange(0.1, 10.0)]
+    [double] $HandleIntervalSeconds = 0.5,
 
     [int] $TargetPid = 0
 )
@@ -33,7 +36,11 @@ function Write-CaptureStatus {
         phase = $Phase
         message = $Message
         updated_utc = [DateTimeOffset]::UtcNow.ToString('o')
-        session_name = $script:SessionName
+        session_names = @(
+            $script:AuditSessionName,
+            $script:ProcessSessionName,
+            $script:ObSessionName
+        )
         target_pid = $script:ResolvedTargetPid
     }
     foreach ($entry in $Extra.GetEnumerator()) {
@@ -55,18 +62,31 @@ $resolvedOutput = [System.IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Force -Path $resolvedOutput | Out-Null
 
 $script:SessionName = 'RandgridAudit-' + $PID + '-' + [DateTimeOffset]::UtcNow.ToString('yyyyMMddHHmmss')
+$script:AuditSessionName = $script:SessionName + '-Audit'
+$script:ProcessSessionName = $script:SessionName + '-Process'
+$script:ObSessionName = $script:SessionName + '-ObHandle'
 $script:ResolvedTargetPid = $TargetPid
 $script:StatusPath = Join-Path $resolvedOutput 'capture-status.json'
-$etlPath = Join-Path $resolvedOutput 'kernel-audit.etl'
-$dumpPath = Join-Path $resolvedOutput 'kernel-audit-dump.txt'
-$csvPath = Join-Path $resolvedOutput 'kernel-audit.csv'
-$summaryPath = Join-Path $resolvedOutput 'tracerpt-summary.txt'
+$auditEtlPath = Join-Path $resolvedOutput 'kernel-audit.etl'
+$auditDumpPath = Join-Path $resolvedOutput 'kernel-audit-dump.txt'
+$auditCsvPath = Join-Path $resolvedOutput 'kernel-audit.csv'
+$auditSummaryPath = Join-Path $resolvedOutput 'kernel-audit-summary.txt'
+$processEtlPath = Join-Path $resolvedOutput 'kernel-process.etl'
+$processDumpPath = Join-Path $resolvedOutput 'kernel-process-dump.txt'
+$processCsvPath = Join-Path $resolvedOutput 'kernel-process.csv'
+$processSummaryPath = Join-Path $resolvedOutput 'kernel-process-summary.txt'
+$obEtlPath = Join-Path $resolvedOutput 'kernel-ob-handle.etl'
+$obDumpPath = Join-Path $resolvedOutput 'kernel-ob-handle-dump.txt'
+$obCsvPath = Join-Path $resolvedOutput 'kernel-ob-handle.csv'
+$obSummaryPath = Join-Path $resolvedOutput 'kernel-ob-handle-summary.txt'
 $handlesPath = Join-Path $resolvedOutput 'process-handles.jsonl'
 $preflightPath = Join-Path $resolvedOutput 'runtime-preflight.json'
 $xperfPath = 'C:\Program Files (x86)\Windows Kits\10\Windows Performance Toolkit\xperf.exe'
+$tracelogPath = 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\tracelog.exe'
 $handleScript = Join-Path $PSScriptRoot 'snapshot_process_handles.py'
-$providerSpec = 'Microsoft-Windows-Kernel-Audit-API-Calls:0xffffffffffffffff:0x4:stack+Microsoft-Windows-Kernel-Process:0x50:0x4'
-$sessionStarted = $false
+$auditSessionStarted = $false
+$processSessionStarted = $false
+$obSessionStarted = $false
 $snapshotProcess = $null
 
 Write-CaptureStatus -Phase 'preflight' -Message 'Validating elevation, target, driver, and tracing tools.'
@@ -78,11 +98,19 @@ try {
     if (-not (Test-Path -LiteralPath $xperfPath -PathType Leaf)) {
         throw "xperf.exe is unavailable at $xperfPath"
     }
+    if (-not (Test-Path -LiteralPath $tracelogPath -PathType Leaf)) {
+        throw "tracelog.exe is unavailable at $tracelogPath"
+    }
     if (-not (Test-Path -LiteralPath $PythonPath -PathType Leaf)) {
         throw "Python is unavailable at $PythonPath"
     }
     if (-not (Test-Path -LiteralPath $handleScript -PathType Leaf)) {
         throw "Handle snapshot helper is unavailable at $handleScript"
+    }
+    foreach ($tool in 'logman.exe', 'tracerpt.exe') {
+        if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
+            throw "$tool is unavailable on PATH."
+        }
     }
 
     $target = if ($TargetPid -gt 0) {
@@ -112,6 +140,8 @@ try {
 
     $processes = Get-CimInstance Win32_Process |
         Where-Object { $_.Name -match '^(cod|bootstrapper|CODBrokerService|codCrashHandler)\.exe$' } |
+            Select-Object ProcessId, ParentProcessId, Name, CreationDate
+    $processInventory = Get-CimInstance Win32_Process |
         Select-Object ProcessId, ParentProcessId, Name, CreationDate
 
     [ordered]@{
@@ -135,29 +165,62 @@ try {
             }
         }
         processes = @($processes)
+        process_inventory = @($processInventory)
         trace = [ordered]@{
             duration_seconds = $DurationSeconds
-            session_name = $script:SessionName
-            providers = @(
-                'Microsoft-Windows-Kernel-Audit-API-Calls',
-                'Microsoft-Windows-Kernel-Process'
+            handle_interval_seconds = $HandleIntervalSeconds
+            sessions = @(
+                [ordered]@{
+                    name = $script:AuditSessionName
+                    provider = 'Microsoft-Windows-Kernel-Audit-API-Calls'
+                    keywords = '0x0'
+                    level = '0x4'
+                },
+                [ordered]@{
+                    name = $script:ProcessSessionName
+                    provider = 'Microsoft-Windows-Kernel-Process'
+                    keywords = '0x50'
+                    level = '0x4'
+                },
+                [ordered]@{
+                    name = $script:ObSessionName
+                    provider = 'independent SystemTraceProvider session'
+                    flags = 'PROC_THREAD+LOADER+OB_HANDLE'
+                }
             )
             privacy = 'Raw ETL/dumps remain local and are excluded from Git.'
             safety = 'No process handle is opened to cod.exe; no device or service operation is performed.'
         }
     } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $preflightPath -Encoding utf8
 
-    Write-CaptureStatus -Phase 'starting' -Message 'Starting a uniquely named user ETW session and passive handle snapshots.'
+    Write-CaptureStatus -Phase 'starting' -Message 'Starting three uniquely named ETW sessions and passive handle snapshots.'
 
-    & $xperfPath -start $script:SessionName -on $providerSpec -f $etlPath `
-        -FileMode Circular -MaxFile 128 -BufferSize 64 -MinBuffers 16 -MaxBuffers 64
+    & logman.exe create trace $script:AuditSessionName `
+        -p 'Microsoft-Windows-Kernel-Audit-API-Calls' 0x0 0x4 `
+        -o $auditEtlPath -f bincirc -max 128 -bs 64 -nb 16 64 -ets
     if ($LASTEXITCODE -ne 0) {
-        throw "xperf failed to start session $($script:SessionName) (exit $LASTEXITCODE)."
+        throw "logman failed to start session $($script:AuditSessionName) (exit $LASTEXITCODE)."
     }
-    $sessionStarted = $true
+    $auditSessionStarted = $true
+
+    & logman.exe create trace $script:ProcessSessionName `
+        -p 'Microsoft-Windows-Kernel-Process' 0x50 0x4 `
+        -o $processEtlPath -f bincirc -max 128 -bs 64 -nb 16 64 -ets
+    if ($LASTEXITCODE -ne 0) {
+        throw "logman failed to start session $($script:ProcessSessionName) (exit $LASTEXITCODE)."
+    }
+    $processSessionStarted = $true
+
+    & $tracelogPath -start $script:ObSessionName -f $obEtlPath -cir 256 `
+        -b 64 -min 32 -max 128 -UsePerfCounter -systemlogger -independent `
+        -eflag PROC_THREAD+LOADER+OB_HANDLE
+    if ($LASTEXITCODE -ne 0) {
+        throw "tracelog failed to start session $($script:ObSessionName) (exit $LASTEXITCODE)."
+    }
+    $obSessionStarted = $true
 
     $snapshotArguments = '"' + $handleScript + '" --output "' + $handlesPath +
-        '" --duration ' + $DurationSeconds + ' --interval 0.5'
+        '" --duration ' + $DurationSeconds + ' --interval ' + $HandleIntervalSeconds
     $snapshotProcess = Start-Process -FilePath $PythonPath `
         -ArgumentList $snapshotArguments -PassThru -WindowStyle Hidden
 
@@ -176,11 +239,23 @@ try {
         }
     }
 
-    & $xperfPath -stop $script:SessionName
+    & $tracelogPath -stop $script:ObSessionName
     if ($LASTEXITCODE -ne 0) {
-        throw "xperf failed to stop session $($script:SessionName) cleanly (exit $LASTEXITCODE)."
+        throw "tracelog failed to stop session $($script:ObSessionName) cleanly (exit $LASTEXITCODE)."
     }
-    $sessionStarted = $false
+    $obSessionStarted = $false
+
+    & logman.exe stop $script:AuditSessionName -ets
+    if ($LASTEXITCODE -ne 0) {
+        throw "logman failed to stop session $($script:AuditSessionName) cleanly (exit $LASTEXITCODE)."
+    }
+    $auditSessionStarted = $false
+
+    & logman.exe stop $script:ProcessSessionName -ets
+    if ($LASTEXITCODE -ne 0) {
+        throw "logman failed to stop session $($script:ProcessSessionName) cleanly (exit $LASTEXITCODE)."
+    }
+    $processSessionStarted = $false
 
     if ($snapshotProcess -and -not $snapshotProcess.WaitForExit(30000)) {
         throw "Handle snapshot helper PID $($snapshotProcess.Id) exceeded its internal duration. It was not terminated."
@@ -191,21 +266,50 @@ try {
 
     Write-CaptureStatus -Phase 'decoding' -Message 'Decoding ETL locally; raw output remains Git-ignored.'
 
-    & $xperfPath -i $etlPath -o $dumpPath -a dumper `
-        -provider e02a841c-75a3-4fa7-afc8-ae09cf9b7f23 22fb2cd6-0e7b-422b-a0c7-2fad1fd0e716 `
-        -add_fieldnames -add_rawdata
-    $xperfDumpExit = $LASTEXITCODE
+    & $xperfPath -i $auditEtlPath -o $auditDumpPath -a dumper -add_fieldnames -add_rawdata
+    $auditXperfDumpExit = $LASTEXITCODE
+    & tracerpt.exe $auditEtlPath -o $auditCsvPath -of CSV -summary $auditSummaryPath -y
+    $auditTracerptExit = $LASTEXITCODE
 
-    & tracerpt.exe $etlPath -o $csvPath -of CSV -summary $summaryPath -y
-    $tracerptExit = $LASTEXITCODE
+    & $xperfPath -i $processEtlPath -o $processDumpPath -a dumper -add_fieldnames -add_rawdata
+    $processXperfDumpExit = $LASTEXITCODE
+    & tracerpt.exe $processEtlPath -o $processCsvPath -of CSV -summary $processSummaryPath -y
+    $processTracerptExit = $LASTEXITCODE
+
+    & $xperfPath -i $obEtlPath -o $obDumpPath -a dumper -add_fieldnames -add_rawdata
+    $obXperfDumpExit = $LASTEXITCODE
+    & tracerpt.exe $obEtlPath -o $obCsvPath -of CSV -summary $obSummaryPath -y
+    $obTracerptExit = $LASTEXITCODE
+
+    $decoderExitCodes = @(
+        $auditXperfDumpExit,
+        $auditTracerptExit,
+        $processXperfDumpExit,
+        $processTracerptExit,
+        $obXperfDumpExit,
+        $obTracerptExit
+    )
+    if ($decoderExitCodes | Where-Object { $_ -ne 0 }) {
+        throw "One or more ETL decoders failed: $($decoderExitCodes -join ', ')."
+    }
 
     Write-CaptureStatus -Phase 'complete' -Message 'Bounded passive capture completed.' -Extra @{
-        etl_path = $etlPath
+        audit_etl_path = $auditEtlPath
+        process_etl_path = $processEtlPath
         handle_snapshot_path = $handlesPath
-        xperf_dump_path = $dumpPath
-        tracerpt_csv_path = $csvPath
-        xperf_dump_exit_code = $xperfDumpExit
-        tracerpt_exit_code = $tracerptExit
+        audit_xperf_dump_path = $auditDumpPath
+        audit_tracerpt_csv_path = $auditCsvPath
+        audit_xperf_dump_exit_code = $auditXperfDumpExit
+        audit_tracerpt_exit_code = $auditTracerptExit
+        process_xperf_dump_path = $processDumpPath
+        process_tracerpt_csv_path = $processCsvPath
+        process_xperf_dump_exit_code = $processXperfDumpExit
+        process_tracerpt_exit_code = $processTracerptExit
+        ob_etl_path = $obEtlPath
+        ob_xperf_dump_path = $obDumpPath
+        ob_tracerpt_csv_path = $obCsvPath
+        ob_xperf_dump_exit_code = $obXperfDumpExit
+        ob_tracerpt_exit_code = $obTracerptExit
         driver_sha256 = $driverHash
     }
 }
@@ -217,9 +321,15 @@ catch {
     throw
 }
 finally {
-    if ($sessionStarted) {
+    if ($auditSessionStarted) {
         # Stop only the exact session created by this invocation. Existing
         # system/kernel loggers are never modified.
-        & $xperfPath -stop $script:SessionName 2>$null | Out-Null
+        & logman.exe stop $script:AuditSessionName -ets 2>$null | Out-Null
+    }
+    if ($processSessionStarted) {
+        & logman.exe stop $script:ProcessSessionName -ets 2>$null | Out-Null
+    }
+    if ($obSessionStarted) {
+        & $tracelogPath -stop $script:ObSessionName 2>$null | Out-Null
     }
 }

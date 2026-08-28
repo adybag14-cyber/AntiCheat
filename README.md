@@ -33,7 +33,10 @@ The analyzed driver has SHA-256:
 | Dynamic routine-name candidates | 0 non-import plaintext candidates |
 | Running driver identity | exact static-input hash, valid Activision signature |
 | Live DOS-device link | `Randgrid` → `\Device\Randgrid` |
-| Runtime handle-access stripping | unresolved; privileged correlation not completed |
+| Runtime target object | exact audit/OB correlation; 2,208 same-thread matches, 1.0 dominant-object ratio |
+| Persistent handles to game | 41 in both elevated snapshot and kernel rundown; 41/41 tuple overlap |
+| Universal literal handle hiding | contradicted by direct runtime evidence |
+| Selective handle-access stripping | strongly suggested by owner/mask patterns; no handle-specific rewrite proved |
 
 The authoritative narrative is
 [`docs/07-randgrid-deep-dive.md`](docs/07-randgrid-deep-dive.md). It explicitly
@@ -43,7 +46,8 @@ inferences, and unresolved behavior.
 The bounded runtime follow-up is
 [`docs/08-randgrid-runtime-behavior.md`](docs/08-randgrid-runtime-behavior.md).
 It proves the live driver/device identity and cross-channel collision behavior,
-and explains exactly why handle-right stripping is not yet proved.
+identifies the live game process object, disproves universal literal handle
+hiding, and narrows the remaining question to handle-specific access rewriting.
 
 ## Reproduce the call census
 
@@ -98,7 +102,7 @@ is also not use evidence until a caller to that stub is recovered.
   deterministic PE/IAT/stub/unwind analyzer.
 - [`scripts/ghidra/`](scripts/ghidra/) — read-only Ghidra evidence exporters.
 - [`scripts/runtime/`](scripts/runtime/) — bounded passive runtime collectors;
-  raw ETL/handle metadata remains Git-ignored.
+  streaming audit/OB correlator; raw ETL/handle metadata remains Git-ignored.
 - [`scripts/historical/`](scripts/historical/) — provenance scripts from reports
   05–06; not authoritative for behavior claims.
 - [`evidence/`](evidence/) — compact generated JSON/Markdown without driver
