@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "input": {
+    "name": "Randgrid.sys",
+    "size": 13130616,
+    "sha256": "4150290A810EBEBE9F9E6B5BD32C60299F9F34C3D2B6F02B89590ED49A6B895E"
+  },
+  "toolchain": {
+    "python": ">=3.11",
+    "capstone": "5.0.9",
+    "pefile": "2024.8.26"
+  },
+  "artifacts": {
+    "evidence/randgrid-deep-xrefs.json": "2C122B76765C02933D1AB4901374C61A46457595680E63EFFAA90E0B8F568ED4",
+    "evidence/randgrid-deep-xrefs.md": "EA35D44CA9D77671E88FFFAA43F1D0CB97803247399E397B54C95D2F6AB801A7",
+    "docs/07-randgrid-deep-dive.md": "F388B3F8E949447BB8E99324CCB5CB9B0D9F7399FDC8C10B7B564B07B3530B20",
+    "scripts/randgrid_deep_xrefs.py": "F40A7A4B60C7D729E837A703E21812CB89791F24598826E8C5EB4CB1A9937CC8"
+  }
+}

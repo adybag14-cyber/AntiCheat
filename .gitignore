@@ -1,0 +1,31 @@
+# Proprietary or executable inputs
+*.sys
+*.dll
+*.exe
+*.jar
+*.zip
+*.7z
+
+# Local reverse-engineering state
+.tools/
+analysis/
+local-analysis/
+raw/
+*.gpr
+*.rep/
+*.log
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
