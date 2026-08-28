@@ -33,5 +33,15 @@ SystemTraceProvider `OB_HANDLE` trace, and 100 ms system handle-table snapshots.
 It publishes no transient PID, handle, kernel pointer, command line, or raw ETL.
 The aggregate records 2,208 exact same-caller/thread/time object correlations,
 41 persistent target handles with a 41/41 independent rundown overlap, and the
-strict remaining limit: selective requested-to-granted rewriting is not claimed
-without a handle-specific stored-mask join.
+strict capture-specific limit: none of that trace's microsecond-lived returned
+handles survived to a periodic granted-mask snapshot.
+
+`live-capture.json` is a privacy-reduced schema-v2 aggregate from the original
+non-admin PR capture and a subsequent same-host non-admin/UAC verification. It
+contains no host/user name, PID, raw handle, kernel pointer, command line, launch
+token, local path, memory address, or process bytes. It records the later
+handle-specific comparison—requested `0x410`, stored `0x1000` in both privilege
+contexts—along with corrected device, pipe, module-error, region-metadata,
+token-elevation, process-protection, and parent-topology claim boundaries. Raw
+research captures stay under Git-ignored `local-analysis/` and are not public
+evidence.

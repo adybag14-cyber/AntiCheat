@@ -6,7 +6,9 @@ with the current deep dive focused on `Randgrid.sys`.
 This repository contains original analysis, reproducible static-analysis tools,
 and compact derived evidence. It does **not** contain Activision binaries,
 extracted application bundles, private symbols, Ghidra databases, raw ETL,
-raw system-handle rows, or live anti-cheat payload captures.
+raw system-handle rows, or raw live anti-cheat captures. Published runtime
+artifacts are privacy-reduced aggregates; raw captures stay Git-ignored under
+`local-analysis/`.
 
 ## Latest confirmed Randgrid results
 
@@ -36,7 +38,7 @@ The analyzed driver has SHA-256:
 | Runtime target object | exact audit/OB correlation; 2,208 same-thread matches, 1.0 dominant-object ratio |
 | Persistent handles to game | 41 in both elevated snapshot and kernel rundown; 41/41 tuple overlap |
 | Universal literal handle hiding | contradicted by direct runtime evidence |
-| Selective handle-access stripping | strongly suggested by owner/mask patterns; no handle-specific rewrite proved |
+| Selective handle-access reduction | exact `0x410` request → stored `0x1000`, reproduced non-admin and elevated |
 
 The authoritative narrative is
 [`docs/07-randgrid-deep-dive.md`](docs/07-randgrid-deep-dive.md). It explicitly
@@ -48,6 +50,32 @@ The bounded runtime follow-up is
 It proves the live driver/device identity and cross-channel collision behavior,
 identifies the live game process object, disproves universal literal handle
 hiding, and narrows the remaining question to handle-specific access rewriting.
+
+## Live capture (dynamic complement)
+
+[`docs/08-live-analysis.md`](docs/08-live-analysis.md) records the separate
+non-admin/UAC verification of the driver service, device namespace, broker
+pipe, process-access mask, module API, region metadata, and crash-handler
+topology. Its machine-readable authority is the privacy-reduced
+[`evidence/live-capture.json`](evidence/live-capture.json).
+
+Headline findings:
+
+- three store-specific services are registered; the Steam `_sr` service was
+  running;
+- `Randgrid` resolves to `\Device\Randgrid`, while metadata-only and read-only
+  opens returned error 5 in both privilege contexts; the device-specific denial
+  mechanism remains unresolved;
+- `COD.Broker.v1` was read-only openable and peekable without consuming data;
+- a `0x410` game-process request produced a handle whose stored granted mask was
+  `0x1000`, both non-admin and elevated;
+- the game was neither elevated nor PPL;
+- module snapshotting returned `Access denied`, while region metadata remained
+  enumerable.
+
+`scripts/live_capture.py` retains opt-in active blue-team research tiers. Their
+presence is not evidence that they ran in the public capture, and raw output now
+defaults to Git-ignored `local-analysis/`.
 
 ## Reproduce the call census
 
@@ -96,28 +124,38 @@ is also not use evidence until a caller to that stub is recovered.
 
 ## Repository map
 
-- [`docs/`](docs/) — the static-analysis report chain, corrections, and current
-  Randgrid deep dive.
+- [`docs/`](docs/) — the static-analysis report chain, corrections, current
+  Randgrid deep dive, and the live-capture report (doc 08).
 - [`scripts/randgrid_deep_xrefs.py`](scripts/randgrid_deep_xrefs.py) — tested,
   deterministic PE/IAT/stub/unwind analyzer.
+- [`scripts/live_capture.py`](scripts/live_capture.py) — tiered live-capture
+  research probe (pure `ctypes`): observe / probe / memory-trap / optional
+  injection; raw output is local-only by default.
+- [`scripts/live_discover.ps1`](scripts/live_discover.ps1) — PowerShell
+  live-state discovery helper (services, devices, pipes, game identity).
 - [`scripts/ghidra/`](scripts/ghidra/) — read-only Ghidra evidence exporters.
 - [`scripts/runtime/`](scripts/runtime/) — bounded passive runtime collectors;
   streaming audit/OB correlator; raw ETL/handle metadata remains Git-ignored.
 - [`scripts/historical/`](scripts/historical/) — provenance scripts from reports
   05–06; not authoritative for behavior claims.
 - [`evidence/`](evidence/) — compact generated JSON/Markdown without driver
-  bytes.
+  bytes, plus privacy-reduced live aggregates.
 - [`tests/`](tests/) — helper tests and a published-evidence contract.
 
 ## Non-goals and boundaries
 
 This repository does not provide:
 
-- anti-cheat bypasses, disabling, evasion, concealment, or process attachment;
-- live driver/device probing or undocumented IOCTL recipes;
+- anti-cheat bypasses, disabling, evasion, or concealment;
 - game input automation or cheating functionality;
 - redistribution of third-party proprietary binaries or decompiled source;
 - claims that a plan or static capability proves observed runtime behavior.
+
+The published live evidence is a bounded, privacy-reduced observation. The
+source tree also retains active blue-team research tiers for explicitly
+authorized disposable sessions; those tiers are not represented as read-only,
+are not part of the public verification run, and do not broaden the claims made
+by the published artifact.
 
 The work is independent research and is not affiliated with or endorsed by
 Activision, Microsoft, or the RICOCHET team. See [`NOTICE.md`](NOTICE.md) for the

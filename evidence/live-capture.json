@@ -1,0 +1,169 @@
+{
+  "schema_version": 2,
+  "artifact": "privacy-reduced live Randgrid verification",
+  "capture": {
+    "original_capture_utc": "2026-08-28T21:55:50.434944+00:00",
+    "independent_verification_date_utc": "2026-08-28",
+    "pr_head": "076583a567999b452b40b5430000de79d56bfac6",
+    "original_capture_administrator": false,
+    "original_capture_max_tier": 2,
+    "raw_capture_published": false
+  },
+  "safety": {
+    "original_recorded_run": {
+      "device_opened": false,
+      "device_ioctl_calls_reached": 0,
+      "candidate_write_regions": 0,
+      "process_memory_write_calls_reached": 0,
+      "injection_executed": false
+    },
+    "independent_verification": {
+      "device_ioctl_calls": 0,
+      "pipe_write_calls": 0,
+      "process_memory_reads": 0,
+      "process_memory_writes": 0,
+      "remote_allocations": 0,
+      "remote_threads": 0,
+      "service_or_driver_changes": 0,
+      "process_terminations": 0
+    }
+  },
+  "driver_services": [
+    {
+      "name": "atvi-randgrid",
+      "state": "Stopped",
+      "start_mode": "Manual",
+      "store": "Battle.net"
+    },
+    {
+      "name": "atvi-randgrid_msstore",
+      "state": "Stopped",
+      "start_mode": "Manual",
+      "store": "Microsoft Store"
+    },
+    {
+      "name": "atvi-randgrid_sr",
+      "state": "Running",
+      "start_mode": "Manual",
+      "store": "Steam"
+    }
+  ],
+  "device": {
+    "dos_name": "Randgrid",
+    "resolved_target": "\\Device\\Randgrid",
+    "namespace_published": true,
+    "non_admin": {
+      "metadata_only_opened": false,
+      "read_only_opened": false,
+      "error_code": 5,
+      "error": "Access is denied."
+    },
+    "administrator": {
+      "metadata_only_opened": false,
+      "read_only_opened": false,
+      "error_code": 5,
+      "error": "Access is denied."
+    },
+    "causal_mechanism": "unresolved",
+    "boundary": "The denial may be enforced by the device DACL, the driver's create/open dispatch path, or another device-specific authorization mechanism. ObRegisterCallbacks does not register for device-object opens."
+  },
+  "broker_pipe": {
+    "name": "COD.Broker.v1",
+    "non_admin_read_only_opened": true,
+    "non_admin_peek_succeeded": true,
+    "administrator_read_only_opened": true,
+    "administrator_peek_succeeded": true,
+    "bytes_available": 0,
+    "bytes_consumed": 0,
+    "protocol_decoded": false
+  },
+  "game_process": {
+    "name": "cod.exe",
+    "requested_access": {
+      "mask": "0x00000410",
+      "rights": [
+        "PROCESS_QUERY_INFORMATION",
+        "PROCESS_VM_READ"
+      ]
+    },
+    "non_admin_granted_access": {
+      "mask": "0x00001000",
+      "rights": [
+        "PROCESS_QUERY_LIMITED_INFORMATION"
+      ]
+    },
+    "administrator_granted_access": {
+      "mask": "0x00001000",
+      "rights": [
+        "PROCESS_QUERY_LIMITED_INFORMATION"
+      ]
+    },
+    "token_is_elevated": false,
+    "protection_level": "PROTECTION_LEVEL_NONE",
+    "access_reduction_observed": true,
+    "callback_attribution": "Access reduction is directly observed; attribution to a particular callback requires separate event/callback correlation."
+  },
+  "module_snapshot": {
+    "non_admin": {
+      "succeeded": false,
+      "error_code": 5,
+      "error": "Access is denied.",
+      "module_count": null
+    },
+    "administrator": {
+      "succeeded": false,
+      "error_code": 5,
+      "error": "Access is denied.",
+      "module_count": null
+    },
+    "boundary": "An API failure is not a successfully enumerated empty module list."
+  },
+  "region_metadata": {
+    "non_admin": {
+      "enumeration_succeeded": true,
+      "region_count": 14632
+    },
+    "administrator": {
+      "enumeration_succeeded": true,
+      "region_count": 14644
+    },
+    "process_bytes_read": 0,
+    "process_bytes_written": 0,
+    "addresses_published": false,
+    "boundary": "Counts are a live sample and may change while the process runs."
+  },
+  "process_topology": {
+    "game_crash_handler_direct_child_count": 1,
+    "parent_relationship_observed": true,
+    "functional_attachment_proved": false,
+    "process_ids_published": false,
+    "command_lines_published": false
+  },
+  "privacy": {
+    "host_name_published": false,
+    "user_name_published": false,
+    "process_ids_published": false,
+    "raw_handles_published": false,
+    "kernel_pointers_published": false,
+    "command_lines_published": false,
+    "launch_tokens_published": false,
+    "local_paths_published": false,
+    "memory_addresses_published": false,
+    "process_bytes_published": false
+  },
+  "claim_boundary": {
+    "three_store_services_observed": true,
+    "steam_service_running": true,
+    "device_namespace_observed": true,
+    "device_open_denial_observed": true,
+    "device_denial_attributed_to_ob_callbacks": false,
+    "broker_pipe_read_only_peek_observed": true,
+    "process_access_reduction_observed": true,
+    "game_elevated": false,
+    "game_ppl": false,
+    "module_snapshot_denied": true,
+    "empty_module_list_proved": false,
+    "region_metadata_enumerable": true,
+    "crash_handler_parent_relationship_observed": true
+  }
+}

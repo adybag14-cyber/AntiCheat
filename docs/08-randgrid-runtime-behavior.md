@@ -22,15 +22,15 @@ The runtime work now separates three claims that earlier drafts blurred:
 |---|---|---|
 | Randgrid registers an object callback | Proved statically | Exact `ObRegisterCallbacks` call at VA `0x140AB309D` |
 | All handles to the game are hidden | Contradicted at runtime | The exact game process object had 41 visible persistent handles across 17 owners |
-| Randgrid selectively rewrites requested access | Strongly suggested, not causally proved | Request and persistent-mask patterns differ, but no transient returned handle survived long enough for a handle-specific granted-mask snapshot |
+| Handle-specific access reduction | Proved in a follow-up read-only open | Requested `0x410`; the exact returned handle stored `0x1000`, non-admin and elevated |
 | Randgrid outright denies process opens | Not observed in this window | All 2,218 game-target process-open events returned success |
 
 The precise conclusion is:
 
 > Randgrid does not universally hide the game's process object or all handles to
-> it. The observed owner/mask distribution is consistent with selective
-> allowlisting or access reduction, but this capture does not prove a particular
-> callback rewrite for a particular returned handle.
+> it. A follow-up read-only verifier directly observed one `0x410` request stored
+> as `0x1000` in the returned handle. The transformation is proved; attribution
+> to a particular Randgrid callback remains a separate causality question.
 
 This corrects the earlier provisional Task Manager-only temporal inference. The
 final object identity comes from same-caller, same-thread, near-simultaneous
@@ -190,10 +190,17 @@ The final sampler requested a 100 ms sleep and completed 43 snapshots during
 the 10-second active window because each system-wide query adds overhead. Even
 the 100 ms lower bound is approximately 787 times longer than the longest
 transient handle and 25,000 times longer than the median. Therefore it was
-expected to miss all returned transient handles. This is why the analyzer
-reports zero exact requested-to-granted pairs: not because the object identity
-is unknown, but because the newly returned handles closed long before a system
-handle-table snapshot could observe their stored masks.
+expected to miss all returned transient handles. This is why the ETW analyzer
+reports zero exact requested-to-granted pairs for that trace: not because the
+object identity is unknown, but because the newly returned handles closed long
+before a system handle-table snapshot could observe their stored masks.
+
+A subsequent verifier closed that narrow gap for its own controlled read-only
+open. It requested `PROCESS_QUERY_INFORMATION | PROCESS_VM_READ` (`0x410`),
+located the exact returned handle in `SystemExtendedHandleInformation`, and
+observed the stored mask `PROCESS_QUERY_LIMITED_INFORMATION` (`0x1000`). The
+same result reproduced under UAC elevation. No process bytes were read or
+written.
 
 ---
 
@@ -237,7 +244,7 @@ defensible description of the observed runtime behavior.
 
 ---
 
-## 8. Evidence for selective policy—and its limit
+## 8. Direct access reduction and the remaining causal limit
 
 The distribution is not random-looking:
 
@@ -252,8 +259,18 @@ The distribution is not random-looking:
   (`0x1000`).
 
 That pattern is consistent with a selective access policy or allowlist, and it
-is materially stronger than the static import alone. It is still not a causal
-proof that Randgrid transformed `0x410` into `0x1000`:
+is materially stronger than the static import alone. The follow-up verifier now
+adds one handle-specific transformation:
+
+```text
+requested: 0x00000410
+granted:   0x00001000
+contexts:  non-admin and administrator
+```
+
+This proves access reduction for those verifier-owned handles. It does not, by
+itself, prove which registered callback or other kernel policy performed the
+rewrite. The original transient Nahimic events also remain non-causal evidence:
 
 - the 32 newly returned Nahimic handles lived for only microseconds and closed
   before a 100 ms snapshot;
@@ -263,9 +280,10 @@ proof that Randgrid transformed `0x410` into `0x1000`:
 - the handle table includes the stored mask but only for a handle still alive at
   snapshot time.
 
-Accordingly, the evidence supports “selective filtering is plausible and
-runtime-corroborated,” not “this callback definitely removed these exact bits
-from this exact request.”
+Accordingly, the evidence supports “access reduction is directly observed and
+selective filtering is runtime-corroborated,” while the stronger statement
+“this particular Randgrid callback removed these bits” still requires callback
+execution correlation.
 
 ---
 
@@ -337,11 +355,12 @@ Exact running game process object:             proved by audit/OB correlation
 Persistent external handles to that object:   proved by snapshot + rundown
 Universal literal handle hiding:              contradicted
 Outright process-open denial in this window:  not observed
-Selective access filtering/allowlisting:      strongly suggested
-One exact requested -> stored-mask rewrite:   not captured
+Selective access filtering/allowlisting:      runtime-corroborated
+One exact requested -> stored-mask rewrite:   observed (`0x410` -> `0x1000`)
+Attribution to a particular callback:         unresolved
 ```
 
 The remaining uncertainty is now narrow and explicit. It is no longer “we do
-not know which process object is the game” or “Windows redacted every pointer.”
-It is specifically the lack of a shared granted-mask field for the extremely
-short-lived returned handles.
+not know which process object is the game,” “Windows redacted every pointer,” or
+“no requested/granted pair exists.” It is specifically which callback or other
+kernel policy caused the directly observed mask reduction.
