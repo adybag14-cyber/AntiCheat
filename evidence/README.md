@@ -18,3 +18,10 @@ Call classifications:
 
 The tests assert the published evidence contract and fail if the central counts
 or input identity drift unexpectedly.
+
+`randgrid-runtime-passive-summary.json` is a privacy-reduced aggregate from a
+bounded non-elevated observation of the same driver hash while the Steam service
+and game were active. It contains no process command lines, launch tokens, kernel
+object pointers, raw handle rows, or ETL. It proves live driver/device identity
+and the measured cross-channel retry pattern; it explicitly leaves handle-access
+stripping unresolved.

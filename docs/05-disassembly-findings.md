@@ -3,7 +3,7 @@
 **Date:** 2026-08-28
 **Host:** Windows 11 Pro (build 26200), local x86-64 workstation
 **Game:** Call of Duty HQ (Steam), `D:\SteamLibrary\steamapps\common\Call of Duty HQ`
-**Companion docs:** `06-completed-deep-static-analysis.md`, `07-randgrid-deep-dive.md`
+**Companion docs:** `06-completed-deep-static-analysis.md`, `07-randgrid-deep-dive.md`, `08-randgrid-runtime-behavior.md`
 
 ---
 

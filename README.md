@@ -5,8 +5,8 @@ with the current deep dive focused on `Randgrid.sys`.
 
 This repository contains original analysis, reproducible static-analysis tools,
 and compact derived evidence. It does **not** contain Activision binaries,
-extracted application bundles, private symbols, Ghidra databases, or live
-anti-cheat captures.
+extracted application bundles, private symbols, Ghidra databases, raw ETL,
+raw system-handle rows, or live anti-cheat payload captures.
 
 ## Latest confirmed Randgrid results
 
@@ -31,11 +31,19 @@ The analyzed driver has SHA-256:
 | Code Integrity | `CiValidateFileObject` x4, `CiFreePolicyInfo` x8 |
 | CNG | all ten imports reached; ECDSA-P256/SHA-256 verification surface |
 | Dynamic routine-name candidates | 0 non-import plaintext candidates |
+| Running driver identity | exact static-input hash, valid Activision signature |
+| Live DOS-device link | `Randgrid` → `\Device\Randgrid` |
+| Runtime handle-access stripping | unresolved; privileged correlation not completed |
 
 The authoritative narrative is
 [`docs/07-randgrid-deep-dive.md`](docs/07-randgrid-deep-dive.md). It explicitly
 separates import presence, linkage stubs, exact call sites, high-confidence
 inferences, and unresolved behavior.
+
+The bounded runtime follow-up is
+[`docs/08-randgrid-runtime-behavior.md`](docs/08-randgrid-runtime-behavior.md).
+It proves the live driver/device identity and cross-channel collision behavior,
+and explains exactly why handle-right stripping is not yet proved.
 
 ## Reproduce the call census
 
@@ -89,6 +97,8 @@ is also not use evidence until a caller to that stub is recovered.
 - [`scripts/randgrid_deep_xrefs.py`](scripts/randgrid_deep_xrefs.py) — tested,
   deterministic PE/IAT/stub/unwind analyzer.
 - [`scripts/ghidra/`](scripts/ghidra/) — read-only Ghidra evidence exporters.
+- [`scripts/runtime/`](scripts/runtime/) — bounded passive runtime collectors;
+  raw ETL/handle metadata remains Git-ignored.
 - [`scripts/historical/`](scripts/historical/) — provenance scripts from reports
   05–06; not authoritative for behavior claims.
 - [`evidence/`](evidence/) — compact generated JSON/Markdown without driver

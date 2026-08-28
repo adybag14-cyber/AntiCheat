@@ -24,6 +24,14 @@ jobs:
       - name: Compile Python sources
         run: python -m compileall -q scripts tests
 
+      - name: Parse runtime PowerShell collectors
+        shell: pwsh
+        run: |
+          Get-ChildItem scripts/runtime -Filter '*.ps1' | ForEach-Object {
+            [void] [scriptblock]::Create((Get-Content -LiteralPath $_.FullName -Raw))
+          }
+          Write-Host 'runtime PowerShell parse: OK'
+
       - name: Verify published evidence contract
         run: python -m unittest discover -s tests -p 'test_*.py' -v
 

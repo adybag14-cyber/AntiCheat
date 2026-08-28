@@ -13,12 +13,13 @@ The following material is intentionally excluded:
 - `Randgrid.sys` and all other game/application executables;
 - extracted .NET single-file bundles and application assemblies;
 - Ghidra project databases and bulk decompiler output;
-- live named-pipe, device, service, game, or network captures;
+- raw named-pipe, device, service, game, ETL, system-handle, or network captures;
 - private identifiers, credentials, and machine-specific operational data.
 
 Published evidence is limited to facts and compact derived metadata such as
 cryptographic hashes, PE section/import information, API names, selected static
-instruction addresses, counts, and original analysis conclusions. Users must
+instruction addresses, privacy-reduced runtime aggregates, counts, and original
+analysis conclusions. Users must
 obtain any analyzed software lawfully and comply with its license and applicable
 law.
 

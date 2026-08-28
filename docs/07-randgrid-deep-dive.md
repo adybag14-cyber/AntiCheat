@@ -8,6 +8,11 @@
 
 **Safety boundary:** no driver loading, device access, service/game interaction, live tracing, bypass work, or evasion work
 
+> **Runtime follow-up:** `08-randgrid-runtime-behavior.md` proves live driver
+> identity, device-link publication, and the cross-channel collision pattern. It
+> also records why handle-access stripping remains unresolved after the bounded
+> non-elevated capture.
+
 ---
 
 ## 1. Executive result

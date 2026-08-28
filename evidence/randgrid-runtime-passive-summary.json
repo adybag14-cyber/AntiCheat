@@ -1,0 +1,149 @@
+{
+  "schema_version": 1,
+  "capture": {
+    "date": "2026-08-28",
+    "window_utc": {
+      "start": "2026-08-28T21:44:08.9390027+00:00",
+      "end": "2026-08-28T21:44:44.5120697+00:00"
+    },
+    "requested_duration_seconds": 30,
+    "process_metric_samples": 30,
+    "administrator": false,
+    "method": "read-only service/process queries, QueryDosDeviceW, System event log aggregation, and SystemExtendedHandleInformation snapshots",
+    "safety": "No handle was opened to cod.exe; no driver, device, service, game, or existing ETW session was modified."
+  },
+  "driver": {
+    "service_name": "atvi-randgrid_sr",
+    "state": "Running",
+    "start_mode": "Manual",
+    "file_name": "randgrid.sys",
+    "file_size": 13130616,
+    "sha256": "4150290A810EBEBE9F9E6B5BD32C60299F9F34C3D2B6F02B89590ED49A6B895E",
+    "signature_status": "Valid",
+    "signer": "Activision Publishing Inc"
+  },
+  "live_object_namespace": {
+    "query": "QueryDosDeviceW(\"Randgrid\")",
+    "result": "\\Device\\Randgrid",
+    "last_error": 0,
+    "interpretation": "The live DOS-device link exists and resolves to the embedded Randgrid device name."
+  },
+  "variants": [
+    {
+      "service": "atvi-randgrid_sr",
+      "state": "Running",
+      "file_size": 13130616,
+      "sha256": "4150290A810EBEBE9F9E6B5BD32C60299F9F34C3D2B6F02B89590ED49A6B895E",
+      "embedded_device_name": true,
+      "embedded_dos_name": true
+    },
+    {
+      "service": "atvi-randgrid_msstore",
+      "state": "Stopped",
+      "file_size": 13130616,
+      "sha256": "4150290A810EBEBE9F9E6B5BD32C60299F9F34C3D2B6F02B89590ED49A6B895E",
+      "embedded_device_name": true,
+      "embedded_dos_name": true
+    },
+    {
+      "service": "atvi-randgrid",
+      "state": "Stopped",
+      "file_size": 2981352,
+      "sha256": "84564876C27B02290F04B78BC7B1DB180D7EA5FD80408E68A6ACFD00B1A42383",
+      "embedded_device_name": false,
+      "embedded_dos_name": false
+    }
+  ],
+  "active_components": {
+    "stable_across_capture": true,
+    "names": [
+      "CODBrokerService.exe",
+      "bootstrapper.exe",
+      "cod.exe",
+      "codCrashHandler.exe"
+    ],
+    "crash_handler_instances": 2,
+    "command_lines_published": false
+  },
+  "target_process_metrics": {
+    "process_name": "cod.exe",
+    "wall_seconds_between_first_and_last_sample": 34.1565847,
+    "cpu_seconds_delta": 53.296875,
+    "mean_logical_cores_consumed": 1.56036897330663,
+    "threads": {
+      "first": 133,
+      "last": 133,
+      "min": 133,
+      "max": 133
+    },
+    "handles": {
+      "first": 51540,
+      "last": 51613,
+      "min": 51540,
+      "max": 51613
+    },
+    "working_set_bytes": {
+      "min": 2484465664,
+      "max": 2507337728,
+      "mean": 2493203524.266667
+    },
+    "private_memory_bytes": {
+      "min": 11362131968,
+      "max": 11395137536,
+      "mean": 11373669444.266666
+    },
+    "io_delta": {
+      "read_operations": 6405,
+      "write_operations": 6272,
+      "read_bytes": 196611438,
+      "write_bytes": 83632
+    }
+  },
+  "process_handle_table": {
+    "snapshot_count": 45,
+    "final_process_handle_count": 7004,
+    "added_entries": 164,
+    "removed_entries": 204,
+    "changed_entries": 2,
+    "kernel_object_pointers_visible": false,
+    "raw_metadata_published": false
+  },
+  "msstore_collision_events": {
+    "event_log": "System",
+    "event_id": 7000,
+    "error": "Cannot create a file when that file already exists.",
+    "count": 42,
+    "first_local": "2026-08-28T12:17:50.1836416+01:00",
+    "last_local": "2026-08-28T12:27:54.4116087+01:00",
+    "interval_count": 41,
+    "median_interval_seconds": 5.5499154,
+    "p75_interval_seconds": 5.5737118,
+    "p90_interval_seconds": 22.4782662,
+    "intervals_at_or_below_7_seconds": 36,
+    "intervals_over_30_seconds": 4,
+    "long_gaps_seconds": [
+      22.4782662,
+      40.9301299,
+      69.2237857,
+      145.3072324,
+      146.5069734
+    ],
+    "interpretation": "The Store service retries in approximately 5.55-second bursts with longer backoff gaps while the byte-identical Steam driver is already active. The live Randgrid DOS-device link is a plausible collision point, but the event does not name the exact object."
+  },
+  "code_integrity_event_log": {
+    "operational_events_examined_since_noon": 12,
+    "randgrid_or_cod_matches": 0,
+    "interpretation": "No matching event-log entry was observed; this does not prove the static CI call sites were not executed."
+  },
+  "handle_policy_result": {
+    "static_registration": true,
+    "runtime_access_stripping_proved": false,
+    "runtime_access_stripping_disproved": false,
+    "reason": [
+      "The capture was not elevated, so Windows redacted kernel object pointers from the system handle table.",
+      "No Microsoft-Windows-Kernel-Audit-API-Calls or OB_HANDLE provider was active.",
+      "No handle was opened to cod.exe, so no requested-versus-granted access control pair was generated.",
+      "The attempted UAC elevation was cancelled and no privileged ETW session started."
+    ]
+  }
+}
