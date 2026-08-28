@@ -186,12 +186,14 @@ For the exactly identified game object, the OB stream recorded:
 | 95th-percentile lifetime | 11 μs |
 | Maximum lifetime | 127 μs |
 
-The final sampler queried at 100 ms intervals—approximately 787 times slower
-than the longest transient handle and 25,000 times slower than the median.
-Therefore it was expected to miss all returned transient handles. This is why
-the analyzer reports zero exact requested-to-granted pairs: not because the
-object identity is unknown, but because the newly returned handles closed long
-before a system handle-table snapshot could observe their stored masks.
+The final sampler requested a 100 ms sleep and completed 43 snapshots during
+the 10-second active window because each system-wide query adds overhead. Even
+the 100 ms lower bound is approximately 787 times longer than the longest
+transient handle and 25,000 times longer than the median. Therefore it was
+expected to miss all returned transient handles. This is why the analyzer
+reports zero exact requested-to-granted pairs: not because the object identity
+is unknown, but because the newly returned handles closed long before a system
+handle-table snapshot could observe their stored masks.
 
 ---
 
