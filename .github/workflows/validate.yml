@@ -2,27 +2,50 @@ name: Validate static research
 
 on:
   push:
+    branches:
+      - main
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  tests:
-    runs-on: ubuntu-latest
+  full-tests:
+    name: Full suite (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: ubuntu-24.04-x64-py311
+            os: ubuntu-24.04
+            python: "3.11"
+            architecture: x64
+          - label: windows-2025-x64-py311
+            os: windows-2025
+            python: "3.11"
+            architecture: x64
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python }}
+          architecture: ${{ matrix.architecture }}
           cache: pip
 
-      - name: Install analysis dependencies
-        run: python -m pip install -r requirements.txt
+      - name: Install project and analysis dependencies
+        run: python -m pip install -r requirements.txt -e ".[dev]"
 
       - name: Compile Python sources
-        run: python -m compileall -q scripts tests
+        run: python -m compileall -q src scripts tests
+
+      - name: Check portable Python sources
+        run: |
+          python -m ruff check src tests/test_linux_system_port.py tests/test_windows_system_port.py tests/test_portable_compatibility.py
+          python -m ruff format --check src tests/test_linux_system_port.py tests/test_windows_system_port.py tests/test_portable_compatibility.py
+          python -m mypy src
 
       - name: Parse runtime PowerShell collectors
         shell: pwsh
@@ -32,7 +55,7 @@ jobs:
           }
           Write-Host 'runtime PowerShell parse: OK'
 
-      - name: Verify published evidence contract
+      - name: Verify full published evidence contract
         run: python -m unittest discover -s tests -p 'test_*.py' -v
 
       - name: Parse evidence JSON
@@ -41,3 +64,109 @@ jobs:
           [json.loads(p.read_text(encoding='utf-8'))
           for p in pathlib.Path('evidence').glob('*.json')];
           print('evidence JSON parse: OK')"
+
+      - name: Exercise native snapshot and monitor
+        run: |
+          python -m anticheat_system snapshot --self --out local-analysis/ci-snapshot.json
+          python -m anticheat_system monitor --self --no-hash-executable --samples 2 --interval 0 --out local-analysis/ci-monitor.jsonl
+          python -m anticheat_system verify-chain local-analysis/ci-monitor.jsonl
+          python -c "import json,pathlib; from anticheat_system.contract import validate_snapshot_contract; p=json.loads(pathlib.Path('local-analysis/ci-snapshot.json').read_text()); validate_snapshot_contract(p); assert p['capture']['read_only'] is True; assert p['target']['memory_maps']['status'] == 'observed'; assert p['privacy']['process_ids_included'] is False; print('native passive live smoke: OK')"
+
+  compatibility:
+    name: Compatibility (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: ubuntu-22.04-x64-py311
+            os: ubuntu-22.04
+            python: "3.11"
+            architecture: x64
+            pointer_bytes: 8
+          - label: ubuntu-24.04-x64-py312
+            os: ubuntu-24.04
+            python: "3.12"
+            architecture: x64
+            pointer_bytes: 8
+          - label: ubuntu-24.04-x64-py313
+            os: ubuntu-24.04
+            python: "3.13"
+            architecture: x64
+            pointer_bytes: 8
+          - label: ubuntu-24.04-x64-py314
+            os: ubuntu-24.04
+            python: "3.14"
+            architecture: x64
+            pointer_bytes: 8
+          - label: ubuntu-24.04-arm64-py314
+            os: ubuntu-24.04-arm
+            python: "3.14"
+            architecture: arm64
+            pointer_bytes: 8
+          - label: windows-2022-x64-py311
+            os: windows-2022
+            python: "3.11"
+            architecture: x64
+            pointer_bytes: 8
+          - label: windows-2025-x64-py312
+            os: windows-2025
+            python: "3.12"
+            architecture: x64
+            pointer_bytes: 8
+          - label: windows-2025-x64-py313
+            os: windows-2025
+            python: "3.13"
+            architecture: x64
+            pointer_bytes: 8
+          - label: windows-2025-x64-py314
+            os: windows-2025
+            python: "3.14"
+            architecture: x64
+            pointer_bytes: 8
+          - label: windows-2022-x86-py311
+            os: windows-2022
+            python: "3.11"
+            architecture: x86
+            pointer_bytes: 4
+          - label: windows-11-arm64-py314
+            os: windows-11-arm
+            python: "3.14"
+            architecture: arm64
+            pointer_bytes: 8
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          architecture: ${{ matrix.architecture }}
+          cache: pip
+
+      - name: Install dependency-free portable package
+        run: python -m pip install -e .
+
+      - name: Verify interpreter architecture
+        run: >-
+          python -c "import ctypes,platform,sys;
+          assert ctypes.sizeof(ctypes.c_void_p) == ${{ matrix.pointer_bytes }};
+          assert (3, 11) <= sys.version_info[:2] < (3, 15);
+          print(platform.platform(), platform.machine(), sys.version)"
+
+      - name: Compile portable sources and tests
+        run: python -m compileall -q src tests/test_linux_system_port.py tests/test_windows_system_port.py tests/test_portable_compatibility.py
+
+      - name: Verify portable contracts
+        run: |
+          python -m unittest discover -s tests -p 'test_*_system_port.py' -v
+          python -m unittest discover -s tests -p 'test_portable_compatibility.py' -v
+
+      - name: Build platform-independent wheel
+        run: python -m pip wheel --no-deps . --wheel-dir local-analysis/wheelhouse
+
+      - name: Exercise native snapshot and monitor
+        run: |
+          python -m anticheat_system snapshot --self --out local-analysis/compat-snapshot.json
+          python -m anticheat_system monitor --self --no-hash-executable --samples 2 --interval 0 --out local-analysis/compat-monitor.jsonl
+          python -m anticheat_system verify-chain local-analysis/compat-monitor.jsonl
+          python -c "import json,pathlib; from anticheat_system.contract import validate_snapshot_contract; p=json.loads(pathlib.Path('local-analysis/compat-snapshot.json').read_text()); validate_snapshot_contract(p); assert p['capture']['read_only'] is True; assert p['privacy']['process_ids_included'] is False; print(p['capture']['backend'], 'compatibility smoke: OK')"
