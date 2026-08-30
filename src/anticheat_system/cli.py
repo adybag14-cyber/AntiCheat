@@ -14,12 +14,12 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from .backend import SystemCaptureBackend, backend_for_current_platform
 from .chain import seal_record, verify_record
 from .errors import ProbeError
-from .linux import LinuxProcfsBackend
 
-DEFAULT_SNAPSHOT = Path("local-analysis/linux-system-snapshot.json")
-DEFAULT_MONITOR = Path("local-analysis/linux-system-monitor.jsonl")
+DEFAULT_SNAPSHOT = Path("local-analysis/system-snapshot.json")
+DEFAULT_MONITOR = Path("local-analysis/system-monitor.jsonl")
 MAX_MONITOR_RECORD_CHARACTERS = 64 * 1024 * 1024
 
 
@@ -27,9 +27,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="anticheat-system",
         description=(
-            "Passive Linux process metadata capture for defensive systems research. "
-            "No ptrace, process-memory access, kernel instrumentation, or target-state "
-            "writes are used."
+            "Portable passive process metadata capture for defensive systems research. "
+            "No debugger attachment, process-memory access, kernel instrumentation, "
+            "or target-state writes are used."
         ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -98,7 +98,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(result, sort_keys=True))
             return 0
 
-        backend = LinuxProcfsBackend()
+        backend = backend_for_current_platform()
         pid = backend.resolve_pid(
             pid=args.pid,
             name=args.name,
@@ -221,7 +221,7 @@ def _write_json_atomic(path: Path, payload: dict[str, Any], *, force: bool) -> N
 
 
 def _run_monitor(
-    backend: LinuxProcfsBackend,
+    backend: SystemCaptureBackend,
     pid: int,
     *,
     output: Path,

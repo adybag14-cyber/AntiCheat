@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import errno
 import json
 import os
 import platform
@@ -8,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -16,6 +18,7 @@ from anticheat_system.chain import seal_record, verify_record
 from anticheat_system.cli import _write_json_atomic, main, verify_chain_file
 from anticheat_system.linux import (
     LinuxProcfsBackend,
+    _open_pidfd,
     categorize_fd_target,
     parse_proc_cgroup,
     parse_proc_maps,
@@ -128,6 +131,45 @@ CoreDumping:\t0
         self.assertEqual(parsed["non_root_membership_count"], 1)
         self.assertFalse(parsed["raw_paths_included"])
         self.assertNotIn("private.scope", json.dumps(parsed))
+
+    def test_cgroup_v1_controllers_are_supported(self) -> None:
+        parsed = parse_proc_cgroup(
+            "2:cpu,cpuacct:/system.slice/game.service\n3:memory:/game\n"
+        )
+        self.assertEqual(parsed["version"], 1)
+        self.assertEqual(parsed["membership_count"], 2)
+        self.assertEqual(parsed["controllers"], ["cpu", "cpuacct", "memory"])
+        self.assertNotIn("game.service", json.dumps(parsed))
+
+    def test_unknown_pidfd_architecture_degrades_to_enosys(self) -> None:
+        with (
+            mock.patch.object(os, "pidfd_open", None, create=True),
+            mock.patch(
+                "anticheat_system.linux.platform.machine", return_value="mips64"
+            ),
+            self.assertRaises(OSError) as raised,
+        ):
+            _open_pidfd(123)
+        self.assertEqual(raised.exception.errno, errno.ENOSYS)
+
+    def test_missing_securityfs_and_sysctls_stay_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            posture = LinuxProcfsBackend(
+                proc_root=root / "proc",
+                sys_root=root / "sys",
+                require_linux=False,
+            ).capture_host_security()
+        self.assertEqual(
+            posture["active_linux_security_modules"]["status"], "unavailable"
+        )
+        self.assertEqual(posture["lockdown"]["status"], "unavailable")
+        self.assertTrue(
+            all(
+                observation["status"] == "unavailable"
+                for observation in posture["sysctls"].values()
+            )
+        )
 
 
 class LinuxBackendSafetyTests(unittest.TestCase):

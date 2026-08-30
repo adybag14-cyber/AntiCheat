@@ -1,6 +1,7 @@
 # Linux Passive Systems Port
 
-**Status:** phase 1 implemented and live-tested on Linux
+**Status:** phase 1 implemented; normalized with the native Windows backend in
+portable package 0.2.0
 
 **Port boundary:** portable passive observation and evidence, not the
 proprietary RICOCHET driver or a bypass
@@ -188,19 +189,22 @@ if an attacker can rewrite both the file and the reported terminal hash.
 
 ## 7. Current parity and non-parity
 
-| Capability | Windows research path | Linux phase 1 |
+| Capability | Windows authority/equivalent | Linux phase 1 |
 |---|---|---|
 | Static proprietary binary analysis | PE/driver analyzer | Existing analyzer runs cross-platform; no ELF target supplied |
-| Stable process identity | Windows handle snapshots | proc directory FD + start time + optional pidfd |
-| Process security metadata | token/PPL/access masks | tracer, seccomp, capabilities, namespaces, cgroups |
-| Loaded code metadata | Toolhelp/region metadata | privacy-reduced `/proc/PID/maps` aggregates |
-| Open object metadata | system handle table | privacy-reduced `/proc/PID/fd` categories |
-| Host security policy | service/device/driver state | LSM/Yama/lockdown/module/BPF/perf/sysctl posture |
-| Kernel event correlation | ETW audit + OB stream | Not implemented |
+| Stable process identity | portable process-object handle + creation time | proc directory FD + start time + optional pidfd |
+| Process security metadata | portable token/PPL/mitigation/architecture query | tracer, seccomp, capabilities, namespaces, cgroups |
+| Loaded code metadata | portable Tool Help + `VirtualQueryEx` aggregates | privacy-reduced `/proc/PID/maps` aggregates |
+| Open object metadata | portable handle count; detailed historical system-handle snapshots | privacy-reduced `/proc/PID/fd` categories |
+| Host security policy | portable Code Integrity/HVCI/Secure Boot/DEP; historical service/device state | LSM/Yama/lockdown/module/BPF/perf/sysctl posture |
+| Kernel event correlation | historical ETW audit + OB stream | Not implemented |
 | Active memory/device research | Explicit opt-in retained Windows tiers | Intentionally not ported |
 
 Phase 1 is therefore a substantive Linux systems port, but not feature parity
 with the elevated Windows ETW correlation work.
+
+The backend-neutral schema and certified OS/Python/architecture matrix are in
+[`10-portable-compatibility.md`](10-portable-compatibility.md).
 
 ## 8. Validation gates
 

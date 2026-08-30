@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Self
 
+from .contract import validate_snapshot_contract
 from .errors import (
     AmbiguousTargetError,
     InconsistentSnapshotError,
@@ -30,7 +31,7 @@ from .errors import (
     classify_os_error,
     unavailable,
 )
-from .signals import derive_signals
+from .signals import derive_signals, summarize_signals
 
 MAX_SMALL_TEXT = 256 * 1024
 MAX_MAPS_TEXT = 32 * 1024 * 1024
@@ -560,6 +561,7 @@ class LinuxProcfsBackend:
             file_descriptors = self._capture_file_descriptors(process, section_errors)
             namespaces = self._capture_namespaces(process)
             cgroups = self._capture_cgroups(process, section_errors)
+            modules = self._modules_from_maps(memory_maps, privacy_mode=privacy_mode)
 
             try:
                 stat_after = parse_proc_stat(process.read_text("stat"))
@@ -605,6 +607,7 @@ class LinuxProcfsBackend:
                     "status": status,
                     "executable": executable,
                     "memory_maps": memory_maps,
+                    "modules": modules,
                     "file_descriptors": file_descriptors,
                     "namespaces": namespaces,
                     "cgroups": cgroups,
@@ -641,10 +644,12 @@ class LinuxProcfsBackend:
                 "command_line_or_environment_included": False,
                 "raw_memory_addresses_included": False,
                 "raw_file_descriptor_targets_included": False,
+                "raw_module_paths_included": False,
                 "raw_namespace_identifiers_included": False,
                 "raw_cgroup_paths_included": False,
                 "process_ids_included": privacy_mode == "local",
                 "executable_path_included": privacy_mode == "local",
+                "user_sid_included": False,
             },
             "host_security": self.capture_host_security(),
             "target": target,
@@ -652,8 +657,29 @@ class LinuxProcfsBackend:
         }
         signals = derive_signals(snapshot)
         snapshot["signals"] = signals
-        snapshot["summary"] = _summarize_signals(signals)
+        snapshot["summary"] = summarize_signals(signals)
+        validate_snapshot_contract(snapshot)
         return snapshot
+
+    @staticmethod
+    def _modules_from_maps(
+        memory_maps: dict[str, Any], *, privacy_mode: str
+    ) -> dict[str, Any]:
+        if memory_maps.get("status") != "observed":
+            return unavailable(memory_maps.get("reason", "maps_unavailable"))
+        result: dict[str, Any] = {
+            "status": "observed",
+            "module_count": memory_maps["unique_executable_file_count"],
+            "unique_executable_file_count": memory_maps["unique_executable_file_count"],
+            "raw_addresses_included": False,
+            "raw_paths_included": False,
+            "snapshot_semantics": "proc-maps-aggregate",
+        }
+        if privacy_mode == "local":
+            result["executable_file_basenames"] = memory_maps.get(
+                "executable_file_basenames", []
+            )
+        return result
 
     def _capture_status(
         self, process: LinuxProcessHandle, errors: list[dict[str, str]]
@@ -882,20 +908,3 @@ def _read_int_observation(path: Path) -> dict[str, Any]:
         return unavailable(classify_os_error(error))
     except ValueError:
         return unavailable("parse_error")
-
-
-def _summarize_signals(signals: list[dict[str, Any]]) -> dict[str, Any]:
-    rank = {"none": 0, "info": 1, "low": 2, "medium": 3, "high": 4}
-    highest = "none"
-    counts: collections.Counter[str] = collections.Counter()
-    for signal in signals:
-        severity = signal["severity"]
-        counts[severity] += 1
-        if rank[severity] > rank[highest]:
-            highest = severity
-    return {
-        "highest_signal_severity": highest,
-        "signal_count": len(signals),
-        "severity_counts": dict(sorted(counts.items())),
-        "verdict": "observation_only",
-    }

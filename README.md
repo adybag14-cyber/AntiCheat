@@ -10,57 +10,76 @@ raw system-handle rows, or raw live anti-cheat captures. Published runtime
 artifacts are privacy-reduced aggregates; raw captures stay Git-ignored under
 `local-analysis/`.
 
-## Linux passive system port
+## Portable passive system
 
-The first Linux systems slice is now implemented as the installable
-`anticheat_system` package. It ports the repository's **passive observation and
-evidence layer**; it does not claim to port Activision's proprietary Windows
-driver, provide a bypass, or make a cheat verdict.
+The installable `anticheat_system` package now provides native, passive
+observation backends for Linux **and** Windows. It ports the repository's
+evidence layer; it does not claim to port Activision's proprietary driver,
+provide a bypass, or make a cheating verdict.
 
-The Linux backend uses bounded, read-only `/proc` and `/sys` metadata to record:
+Both backends implement the same versioned section and privacy contract:
 
-- process identity anchored by an open procfs directory, a stable start time,
-  and `pidfd` when the kernel/Python runtime expose it;
-- executable SHA-256 identity, security status, seccomp state, Linux
-  capabilities, memory-map aggregates, descriptor categories, namespaces, and
-  cgroup shape;
-- host hardening posture including active LSMs, Yama, lockdown, module-signature
-  enforcement, BPF/perf restrictions, address randomization, and kernel taint;
-- conservative, caveated signals for tracers, writable/executable mappings,
-  deleted executable mappings, namespaces, and effective capabilities;
-- bounded JSON Lines monitoring with a SHA-256 record chain.
+- stable process identity anchored by a Linux proc-directory/pidfd pair or a
+  Windows process-object handle, with start/creation identity rechecks;
+- executable SHA-256 identity, process security state, module/map aggregates,
+  descriptor/handle counts, platform security posture, and explicit capability
+  failures;
+- conservative, caveated observations for tracers/debuggers,
+  writable/executable mappings, deleted executable mappings, namespaces, and
+  effective capabilities;
+- bounded JSON Lines monitoring with a SHA-256 record chain, planned-run
+  completeness checks, and atomic no-overwrite snapshot publication.
 
-Install the project and the existing analysis dependencies:
+Linux additionally reports procfs/sysfs, seccomp, capabilities, namespaces,
+cgroups, LSM/Yama/lockdown, module-signature, BPF/perf, ASLR, and taint state.
+Windows additionally reports token elevation/integrity, process protection,
+architecture/WOW64, mitigation masks, Tool Help modules, virtual-region
+metadata, Code Integrity/HVCI options, firmware, Secure Boot, and system DEP.
+
+Install the portable package alone:
 
 ```bash
 python3.11 -m venv .venv
 . .venv/bin/activate
-python -m pip install -r requirements.txt -e .
+python -m pip install -e .
 ```
+
+PowerShell:
+
+```powershell
+py -3.11 -m venv .venv
+& .\.venv\Scripts\python.exe -m pip install -e .
+```
+
+The historical static analyzers additionally require `requirements.txt`.
 
 Capture one privacy-reduced snapshot of the collector itself:
 
 ```bash
 python -m anticheat_system snapshot --self \
-  --out local-analysis/linux-system-snapshot.json
+  --out local-analysis/system-snapshot.json
 ```
 
 Capture ten bounded samples and verify their hash chain:
 
 ```bash
 python -m anticheat_system monitor --pid 1234 --samples 10 --interval 1 \
-  --out local-analysis/linux-system-monitor.jsonl
+  --out local-analysis/system-monitor.jsonl
 python -m anticheat_system verify-chain \
-  local-analysis/linux-system-monitor.jsonl
+  local-analysis/system-monitor.jsonl
 ```
 
 `--name` requires a unique exact process name; otherwise the collector fails
-closed and asks for an explicit PID. Aggregate privacy mode is the default. Use
-`--privacy-mode local` only for local investigation when PID, UID/GID,
-executable path, and mapped executable basenames are actually required.
+closed and asks for an explicit PID. Name matching follows platform semantics:
+case-sensitive on Linux and case-insensitive on Windows. Aggregate privacy mode
+is the default. Use `--privacy-mode local` only when process IDs, executable
+paths, and local module names are actually required.
 
-The architecture, trust boundary, parity map, and next porting stages are in
-[`docs/09-linux-system-port.md`](docs/09-linux-system-port.md).
+The Linux architecture is in
+[`docs/09-linux-system-port.md`](docs/09-linux-system-port.md). The certified
+runtime/OS/architecture matrix, normalized contract, graceful-degradation
+rules, and explicit exclusions are in
+[`docs/10-portable-compatibility.md`](docs/10-portable-compatibility.md).
 
 ## Latest confirmed Randgrid results
 
@@ -189,7 +208,8 @@ is also not use evidence until a caller to that stub is recovered.
 - [`scripts/runtime/`](scripts/runtime/) — bounded passive runtime collectors;
   streaming audit/OB correlator; raw ETL/handle metadata remains Git-ignored.
 - [`src/anticheat_system/`](src/anticheat_system/) — portable passive core,
-  Linux procfs/sysfs backend, conservative signals, CLI, and monitor hash chain.
+  native Linux/Windows backends, normalized contract, conservative signals,
+  CLI, and monitor hash chain.
 - [`scripts/historical/`](scripts/historical/) — provenance scripts from reports
   05–06; not authoritative for behavior claims.
 - [`evidence/`](evidence/) — compact generated JSON/Markdown without driver
@@ -204,7 +224,7 @@ This repository does not provide:
 - game input automation or cheating functionality;
 - redistribution of third-party proprietary binaries or decompiled source;
 - claims that a plan or static capability proves observed runtime behavior.
-- claims that the Linux passive port is a kernel anti-cheat, a proprietary
+- claims that the portable passive system is a kernel anti-cheat, a proprietary
   RICOCHET port, or a standalone cheating determination.
 
 The published live evidence is a bounded, privacy-reduced observation. The

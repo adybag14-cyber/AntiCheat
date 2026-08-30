@@ -7,6 +7,7 @@ produce the same observations.
 
 from __future__ import annotations
 
+import collections
 from typing import Any
 
 
@@ -25,6 +26,21 @@ def derive_signals(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
                 "medium",
                 "The kernel reports a tracer for the target process.",
                 "A debugger or crash handler can be legitimate; correlate with policy and launch context.",
+            )
+        )
+
+    debugger = status.get("debugger_present", {})
+    if (
+        isinstance(debugger, dict)
+        and debugger.get("status") == "observed"
+        and debugger.get("present") is True
+    ):
+        signals.append(
+            _signal(
+                "debugger_attached",
+                "medium",
+                "Windows reports a user-mode debugger for the target process.",
+                "A debugger or crash-analysis tool can be legitimate; correlate with launch policy.",
             )
         )
 
@@ -95,4 +111,21 @@ def _signal(code: str, severity: str, observation: str, caveat: str) -> dict[str
         "severity": severity,
         "observation": observation,
         "caveat": caveat,
+    }
+
+
+def summarize_signals(signals: list[dict[str, Any]]) -> dict[str, Any]:
+    rank = {"none": 0, "info": 1, "low": 2, "medium": 3, "high": 4}
+    highest = "none"
+    counts: collections.Counter[str] = collections.Counter()
+    for signal in signals:
+        severity = signal["severity"]
+        counts[severity] += 1
+        if rank[severity] > rank[highest]:
+            highest = severity
+    return {
+        "highest_signal_severity": highest,
+        "signal_count": len(signals),
+        "severity_counts": dict(sorted(counts.items())),
+        "verdict": "observation_only",
     }

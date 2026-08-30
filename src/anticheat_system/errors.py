@@ -24,6 +24,14 @@ class TargetNotFoundError(ProbeError):
         super().__init__("target_not_found", f"no process matched {selector}")
 
 
+class TargetAccessDeniedError(ProbeError):
+    def __init__(self, selector: str) -> None:
+        super().__init__(
+            "target_access_denied",
+            f"the operating system denied passive metadata access to {selector}",
+        )
+
+
 class AmbiguousTargetError(ProbeError):
     def __init__(self, selector: str, match_count: int) -> None:
         super().__init__(
