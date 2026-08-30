@@ -9,7 +9,14 @@ permissions:
 
 jobs:
   tests:
-    runs-on: ubuntu-latest
+    name: Tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
 
@@ -18,11 +25,17 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-      - name: Install analysis dependencies
-        run: python -m pip install -r requirements.txt
+      - name: Install project and analysis dependencies
+        run: python -m pip install -r requirements.txt -e ".[dev]"
 
       - name: Compile Python sources
-        run: python -m compileall -q scripts tests
+        run: python -m compileall -q src scripts tests
+
+      - name: Check new portable Python sources
+        run: |
+          python -m ruff check src tests/test_linux_system_port.py
+          python -m ruff format --check src tests/test_linux_system_port.py
+          python -m mypy src
 
       - name: Parse runtime PowerShell collectors
         shell: pwsh
@@ -41,3 +54,15 @@ jobs:
           [json.loads(p.read_text(encoding='utf-8'))
           for p in pathlib.Path('evidence').glob('*.json')];
           print('evidence JSON parse: OK')"
+
+      - name: Exercise passive Linux snapshot and monitor
+        if: runner.os == 'Linux'
+        run: |
+          python -m anticheat_system snapshot --self \
+            --out local-analysis/linux-ci-snapshot.json
+          python -m anticheat_system monitor --self \
+            --no-hash-executable --samples 2 --interval 0 \
+            --out local-analysis/linux-ci-monitor.jsonl
+          python -m anticheat_system verify-chain \
+            local-analysis/linux-ci-monitor.jsonl
+          python -c "import json,pathlib; p=json.loads(pathlib.Path('local-analysis/linux-ci-snapshot.json').read_text()); assert p['capture']['read_only'] is True; assert p['capture']['consistency']['start_time_stable'] is True; assert p['target']['memory_maps']['status'] == 'observed'; assert p['privacy']['process_ids_included'] is False; print('Linux passive live smoke: OK')"

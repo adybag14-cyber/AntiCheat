@@ -10,6 +10,58 @@ raw system-handle rows, or raw live anti-cheat captures. Published runtime
 artifacts are privacy-reduced aggregates; raw captures stay Git-ignored under
 `local-analysis/`.
 
+## Linux passive system port
+
+The first Linux systems slice is now implemented as the installable
+`anticheat_system` package. It ports the repository's **passive observation and
+evidence layer**; it does not claim to port Activision's proprietary Windows
+driver, provide a bypass, or make a cheat verdict.
+
+The Linux backend uses bounded, read-only `/proc` and `/sys` metadata to record:
+
+- process identity anchored by an open procfs directory, a stable start time,
+  and `pidfd` when the kernel/Python runtime expose it;
+- executable SHA-256 identity, security status, seccomp state, Linux
+  capabilities, memory-map aggregates, descriptor categories, namespaces, and
+  cgroup shape;
+- host hardening posture including active LSMs, Yama, lockdown, module-signature
+  enforcement, BPF/perf restrictions, address randomization, and kernel taint;
+- conservative, caveated signals for tracers, writable/executable mappings,
+  deleted executable mappings, namespaces, and effective capabilities;
+- bounded JSON Lines monitoring with a SHA-256 record chain.
+
+Install the project and the existing analysis dependencies:
+
+```bash
+python3.11 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements.txt -e .
+```
+
+Capture one privacy-reduced snapshot of the collector itself:
+
+```bash
+python -m anticheat_system snapshot --self \
+  --out local-analysis/linux-system-snapshot.json
+```
+
+Capture ten bounded samples and verify their hash chain:
+
+```bash
+python -m anticheat_system monitor --pid 1234 --samples 10 --interval 1 \
+  --out local-analysis/linux-system-monitor.jsonl
+python -m anticheat_system verify-chain \
+  local-analysis/linux-system-monitor.jsonl
+```
+
+`--name` requires a unique exact process name; otherwise the collector fails
+closed and asks for an explicit PID. Aggregate privacy mode is the default. Use
+`--privacy-mode local` only for local investigation when PID, UID/GID,
+executable path, and mapped executable basenames are actually required.
+
+The architecture, trust boundary, parity map, and next porting stages are in
+[`docs/09-linux-system-port.md`](docs/09-linux-system-port.md).
+
 ## Latest confirmed Randgrid results
 
 The analyzed driver has SHA-256:
@@ -136,6 +188,8 @@ is also not use evidence until a caller to that stub is recovered.
 - [`scripts/ghidra/`](scripts/ghidra/) — read-only Ghidra evidence exporters.
 - [`scripts/runtime/`](scripts/runtime/) — bounded passive runtime collectors;
   streaming audit/OB correlator; raw ETL/handle metadata remains Git-ignored.
+- [`src/anticheat_system/`](src/anticheat_system/) — portable passive core,
+  Linux procfs/sysfs backend, conservative signals, CLI, and monitor hash chain.
 - [`scripts/historical/`](scripts/historical/) — provenance scripts from reports
   05–06; not authoritative for behavior claims.
 - [`evidence/`](evidence/) — compact generated JSON/Markdown without driver
@@ -150,6 +204,8 @@ This repository does not provide:
 - game input automation or cheating functionality;
 - redistribution of third-party proprietary binaries or decompiled source;
 - claims that a plan or static capability proves observed runtime behavior.
+- claims that the Linux passive port is a kernel anti-cheat, a proprietary
+  RICOCHET port, or a standalone cheating determination.
 
 The published live evidence is a bounded, privacy-reduced observation. The
 source tree also retains active blue-team research tiers for explicitly
