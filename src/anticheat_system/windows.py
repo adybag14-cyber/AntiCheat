@@ -12,6 +12,7 @@ import ctypes
 import ctypes.wintypes as wt
 import datetime as dt
 import hashlib
+import importlib
 import os
 import platform
 from dataclasses import dataclass
@@ -1040,13 +1041,13 @@ def _query_code_integrity() -> dict[str, Any]:
 
 def _query_secure_boot() -> dict[str, Any]:
     try:
-        import winreg
+        registry: Any = importlib.import_module("winreg")
 
-        with winreg.OpenKey(
-            winreg.HKEY_LOCAL_MACHINE,
+        with registry.OpenKey(
+            registry.HKEY_LOCAL_MACHINE,
             r"SYSTEM\CurrentControlSet\Control\SecureBoot\State",
         ) as key:
-            value, _ = winreg.QueryValueEx(key, "UEFISecureBootEnabled")
+            value, _ = registry.QueryValueEx(key, "UEFISecureBootEnabled")
         return {"status": "observed", "enabled": bool(int(value))}
     except FileNotFoundError:
         return unavailable("not_supported_or_legacy_firmware")
