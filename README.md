@@ -26,8 +26,9 @@ The analyzed driver has SHA-256:
 | Exact calls through local IAT stubs | 23 |
 | Linear Capstone instructions | 3,478,904 |
 | Executable-byte instruction coverage | 10,983,063 / 11,381,760 (0.9650) |
-| Skipdata remainder classified | 398,697 / 398,697 (classified coverage 1.0000) |
-| Unique mapped function starts | 9,109 |
+| Skipdata remainder recognized | 398,697 / 398,697 (unknown fallback excluded from the metric) |
+| Unique static entry candidates | 8,764 |
+| Exact IAT call sites | 550, separate from entries; 543 primary owners |
 | Exception-directory runtime functions | 2,191 |
 | Largest unwind range | `0x2BADC9` bytes (about 2.73 MiB) |
 | PE entry | `0x140C61000` `jmp 0x14059A14C` (MBA body) |
@@ -50,11 +51,17 @@ The authoritative IAT/unwind narrative is
 separates import presence, linkage stubs, exact call sites, high-confidence
 inferences, and unresolved behavior.
 
-The complete instruction and function-start map is
+The authoritative instruction, entry-candidate, and call-site map is
 [`docs/09-randgrid-full-function-map.md`](docs/09-randgrid-full-function-map.md).
-It linearly disassembles every executable byte, merges `.pdata`, Ghidra, IAT
-stubs/calls, and recovered prologues into 9,109 named starts, and keeps the
-full instruction listing Git-ignored under `analysis/randgrid-full-map/`.
+It enforces the exact input hash, validates and hash-pins the private Ghidra
+catalog, linearly disassembles every executable byte, keeps 550 calls separate
+from 8,764 entry candidates, and assigns each call one primary owner.
+
+The bounded source-like reconstruction is
+[`docs/10-randgrid-source-reconstruction.md`](docs/10-randgrid-source-reconstruction.md).
+It emits a compact, non-operational public example and a Git-ignored full
+comment stream covering every decoded instruction and gap byte. It is explicitly
+not the original source and does not guess protected policy or bypass behavior.
 
 The bounded runtime follow-up is
 [`docs/08-randgrid-runtime-behavior.md`](docs/08-randgrid-runtime-behavior.md).
@@ -108,11 +115,24 @@ python -m venv .venv
   --json .\evidence\randgrid-deep-xrefs.json `
   --markdown .\evidence\randgrid-deep-xrefs.md
 
+analyzeHeadless <projectDir> RandgridProject -process Randgrid.sys `
+  -noanalysis -readOnly `
+  -scriptPath .\scripts\ghidra `
+  -postScript GhidraFullFunctionCatalog.java `
+  .\analysis\randgrid-full-map\ghidra-functions-v2.jsonl
+
 & .\.venv\Scripts\python.exe .\scripts\randgrid_full_map.py `
   --target 'X:\path\to\Randgrid.sys' `
+  --ghidra-catalog .\analysis\randgrid-full-map\ghidra-functions-v2.jsonl `
   --json .\evidence\randgrid-full-map.json `
   --markdown .\evidence\randgrid-full-map.md `
-  --dump-dir .\analysis\randgrid-full-map
+  --dump-dir .\analysis\randgrid-full-map-v2
+
+& .\.venv\Scripts\python.exe .\scripts\randgrid_source_reconstruction.py `
+  --evidence .\evidence\randgrid-full-map.json `
+  --ghidra-catalog .\analysis\randgrid-full-map\ghidra-functions-v2.jsonl `
+  --instructions .\analysis\randgrid-full-map-v2\instructions.tsv.gz `
+  --gaps .\analysis\randgrid-full-map-v2\gaps.tsv.gz
 
 & .\.venv\Scripts\python.exe -m unittest discover `
   -s .\tests -p 'test_*.py' -v
@@ -145,8 +165,11 @@ is also not use evidence until a caller to that stub is recovered.
   Randgrid deep dive, and the live-capture report (doc 08).
 - [`scripts/randgrid_deep_xrefs.py`](scripts/randgrid_deep_xrefs.py) — tested,
   deterministic PE/IAT/stub/unwind analyzer.
-- [`scripts/randgrid_full_map.py`](scripts/randgrid_full_map.py) — complete
-  linear instruction sweep and merged function-start catalog.
+- [`scripts/randgrid_full_map.py`](scripts/randgrid_full_map.py) — hash-pinned
+  linear instruction sweep, entry-candidate catalog, and separately owned exact
+  IAT call sites.
+- [`scripts/randgrid_source_reconstruction.py`](scripts/randgrid_source_reconstruction.py)
+  — non-operational source-like local reconstruction covering every mapped byte.
 - [`scripts/live_capture.py`](scripts/live_capture.py) — tiered live-capture
   research probe (pure `ctypes`): observe / probe / memory-trap / optional
   injection; raw output is local-only by default.
@@ -157,8 +180,8 @@ is also not use evidence until a caller to that stub is recovered.
   streaming audit/OB correlator; raw ETL/handle metadata remains Git-ignored.
 - [`scripts/historical/`](scripts/historical/) — provenance scripts from reports
   05–06; not authoritative for behavior claims.
-- [`evidence/`](evidence/) — compact generated JSON/Markdown without driver
-  bytes, plus privacy-reduced live aggregates.
+- [`evidence/`](evidence/) — compact generated JSON/Markdown with sampled static
+  heads and no complete driver image, plus privacy-reduced live aggregates.
 - [`tests/`](tests/) — helper tests and a published-evidence contract.
 
 ## Non-goals and boundaries
@@ -167,7 +190,7 @@ This repository does not provide:
 
 - anti-cheat bypasses, disabling, evasion, or concealment;
 - game input automation or cheating functionality;
-- redistribution of third-party proprietary binaries or decompiled source;
+- redistribution of third-party proprietary binaries or bulk decompiled/source-like output;
 - claims that a plan or static capability proves observed runtime behavior.
 
 The published live evidence is a bounded, privacy-reduced observation. The

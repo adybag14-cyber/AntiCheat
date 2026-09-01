@@ -1,13 +1,19 @@
 # Evidence artifacts
 
 `randgrid-full-map.json` and its Markdown rendering are deterministic outputs of
-`scripts/randgrid_full_map.py` for the same driver. They catalog every recovered
-function start (`.pdata`, Ghidra, IAT stubs/calls, prologue-like call targets)
-and the linear executable-byte coverage, including a named taxonomy of every
-Capstone skipdata byte (classified coverage 1.0). They do not embed instruction
-bytes for every mapped body; the full instruction listing is the Git-ignored
-`analysis/randgrid-full-map/instructions.tsv.gz` and the per-byte skipdata
-listing is `analysis/randgrid-full-map/gaps.tsv.gz`.
+`scripts/randgrid_full_map.py` for the exact pinned driver and required,
+hash-pinned Ghidra catalog. They keep 8,764 static entry candidates separate
+from 550 exact IAT call sites, assign every call one primary owner, and record
+linear executable-byte coverage with distinct recognized and fallback-label
+metrics. They do not embed instructions for every mapped body; the full listing
+is Git-ignored under `analysis/randgrid-full-map-v2/`.
+
+`randgrid-source-reconstruction-summary.json` pins the ignored full source-like
+reconstruction, instruction dump, gap dump, Ghidra catalog, and compact public
+example by SHA-256. The full `.c.gz` covers every decoded instruction and gap
+byte but remains private because it is a bulk byte-derived representation of
+proprietary code. `examples/randgrid-source-reconstruction.c` is a compact,
+non-operational sample and is explicitly not original source.
 
 `randgrid-deep-xrefs.json` and its Markdown rendering are deterministic outputs
 of `scripts/randgrid_deep_xrefs.py` for the driver identified by SHA-256

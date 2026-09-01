@@ -1,11 +1,11 @@
-# Randgrid.sys — Complete Static Function and Instruction Map
+# Randgrid.sys — Authoritative Static Entry, Call-Site, and Instruction Map
 
 **Date:** 2026-09-01
 
 **Input SHA-256:** `4150290A810EBEBE9F9E6B5BD32C60299F9F34C3D2B6F02B89590ED49A6B895E`
 
-**Scope:** read-only static mapping of every executable byte and recovered
-function start in the on-disk driver
+**Scope:** read-only static mapping of every executable byte, evidence-backed
+entry candidate, and exact IAT call site in the on-disk driver
 
 **Safety boundary:** no driver loading, device access, service/game interaction,
 live tracing, bypass work, or evasion work
@@ -29,22 +29,24 @@ On the official Steam `Randgrid.sys` (13,130,616 bytes, hash above):
 | Linear Capstone instructions | 3,478,904 |
 | Decoded executable bytes | 10,983,063 (instruction coverage **0.9650**) |
 | Skipdata remainder | 398,697 bytes, **398,697 / 398,697 classified** |
-| Classified executable bytes | **1.0000** (instruction + named skipdata) |
-| Unique mapped function starts | **9,109** |
+| Semantically recognized executable bytes | **1.0000** (instruction + recognized skipdata) |
+| Labeled executable bytes | **1.0000** (instruction + all skipdata labels) |
+| Unique static entry candidates | **8,764** |
 | `.pdata` unwind ranges | 2,191 |
 | Ghidra-defined functions exported | 8,105 listed / 8,178 including externals |
 | IAT jump stubs | 656–657 |
-| Exact IAT call thunks recovered | 537 |
-| Functions carrying exact IAT calls | 1,144 |
+| Exact IAT call sites | 550 (527 direct + 23 through stubs) |
+| Entries selected as primary call owners | 543 |
 | Single giant obfuscated unwind blob | RVA `0x1000–0x2BBDC9` (2,862,537 bytes) |
 
 Ghidra auto-analysis kept about 164k instructions across 8,105 listed
 functions. The linear Capstone sweep recovers **more than twenty times** that
-many instructions. The two catalogs are merged: every Ghidra entry, every
-`.pdata` start, every IAT stub/call, and recovered relative-call targets that
-look like real prologues become named starts in one map.
+many instructions. Entry candidates merge Ghidra entries, `.pdata` starts, IAT
+jump stubs, and recovered relative-call targets that look like real prologues.
+IAT call instructions stay in a separate call-site table and are not promoted
+to functions.
 
-This is a complete **static instruction and entry-point map**. It is not a
+This is a complete **static linear-instruction, entry-candidate, and exact-IAT-call map**. It is not a
 complete semantic deobfuscation of the MBA/control-flow-protected bodies.
 
 ---
@@ -53,17 +55,22 @@ complete semantic deobfuscation of the MBA/control-flow-protected bodies.
 
 `scripts/randgrid_full_map.py` never loads the driver. It:
 
-1. Hashes the file and reuses the proven IAT/stub decoder from
+1. Enforces the exact file size/SHA before creating output and reuses the proven IAT/stub decoder from
    `scripts/randgrid_deep_xrefs.py`.
 2. Linear-disassembles every executable section (`.text`, `INIT`, secondary
    `.text`) with Capstone, recording every decoded instruction and every
    skipdata gap.
-3. Seeds function starts from `.pdata`, the PE entry, previously recovered
-   labels, IAT stubs, exact `call [rip+IAT]` sites, prologue-like relative-call
-   targets, and the Ghidra catalog.
-4. Caps inferred (non-`.pdata`) bodies so MBA-region false `E8` immediates
+3. Validates a required, hash-pinned Ghidra catalog including program SHA,
+   image base, tool version, exact body ranges, record counts, and footer.
+4. Seeds entry candidates from `.pdata`, the PE entry, previously recovered
+   function labels, IAT jump stubs, prologue-like relative-call targets, and the
+   Ghidra catalog. Exact `call [rip+IAT]` instructions are separate call sites.
+5. Caps inferred (non-`.pdata`) bodies so MBA-region false `E8` immediates
    cannot swallow megabytes of unrelated code.
-5. Classifies each start (IAT stub, thunk, clear MSVC wrapper, MBA block,
+6. Assigns every exact IAT call one primary owner: the smallest exact Ghidra
+   body first, otherwise the smallest containing `.pdata` range, otherwise
+   unresolved.
+7. Classifies each entry (IAT stub, thunk, clear MSVC wrapper, MBA block,
    epilogue fragment, giant blob, and so on) and names it from known labels or
    exact imports.
 
@@ -75,8 +82,9 @@ Bulk artifacts stay Git-ignored under `analysis/randgrid-full-map/`:
 - `instructions.tsv.gz` — every linear instruction (`va`, size, bytes, text,
   section);
 - `gaps.tsv.gz` — every skipdata byte with coarse/fine class;
-- `functions.json` — the 9,109 starts with sampled heads;
-- `ghidra-functions.jsonl` — the 8,105 listed Ghidra functions.
+- `entries.json` — the 8,764 entry candidates with sampled heads;
+- `ghidra-functions-v2.jsonl` — the 8,105 listed Ghidra functions and 8,775
+  exact body ranges.
 
 Published evidence is `evidence/randgrid-full-map.json` and
 `evidence/randgrid-full-map.md`.
@@ -114,9 +122,9 @@ instruction as an unconditional jump:
 | `ProcessNotifyThunk` | `0x140A294E0` | `jmp 0x140A8DB26` (`ProcessNotifyBody`) | thunk |
 | `ThreadNotifyThunk` | `0x140A2AC70` | `jmp 0x140A8EDB5` (`ThreadNotifyBody`) | thunk |
 | `ObRegisterCallbacks_Setup` | `0x140AB2C18` | `jmp 0x140A9256E` | thunk |
-| `ObRegisterCallbacks_CallSite` | `0x140AB309D` | exact `call [rip+IAT]` | iat_call_thunk |
-| `PsSetCreateProcessNotifyRoutineEx_CallSite` | `0x140AA12F2` | exact IAT call | iat_call_thunk |
-| `PsSetCreateThreadNotifyRoutine_CallSite` | `0x140AA130F` | exact IAT call | iat_call_thunk |
+| `ObRegisterCallbacks_CallSite` | `0x140AB309D` | exact `call [rip+IAT]` | call site; Ghidra-body owner at same VA |
+| `PsSetCreateProcessNotifyRoutineEx_CallSite` | `0x140AA12F2` | exact IAT call | call site; Ghidra-body owner at same VA |
+| `PsSetCreateThreadNotifyRoutine_CallSite` | `0x140AA130F` | exact IAT call | call site; Ghidra-body owner at same VA |
 
 `ProcessNotifyThunk`'s 6,021-byte unwind range still contains the previously
 reported CI / pool / mutex / `ZwQuerySystemInformation` call sites. Those sites
@@ -133,21 +141,21 @@ remain unresolved**. The map names the registration thunk and the exact
 
 ---
 
-## 5. Classification of the 9,109 starts
+## 5. Classification of the 8,764 entry candidates
 
 | Class | Count | Meaning |
 |---|---:|---|
-| `unknown` | 3,862 | Mostly short Ghidra fragments inside protected code |
+| `unknown` | 3,960 | Mostly short Ghidra fragments inside protected code |
 | `mba_obfuscated` | 1,722 | MBA junk (push/pop/xor/`sub rsp` canceling sequences) |
 | `thunk` | 980 | First instruction is an unconditional jump |
 | `mba_epilogue` | 876 | Typical 2-byte `pop rax; popfq` unwind fragments |
 | `iat_stub` | 657 | Six-byte `jmp [rip+IAT]` linkage |
-| `iat_call_thunk` | 537 | Exact `call [rip+IAT]` (or a tight wrapper around one) |
-| `import_bearing` | 235 | Recovered body that contains exact IAT calls |
+| `iat_call_wrapper` | 192 | Ghidra entry candidate whose head begins with an exact IAT call |
+| `import_bearing` | 111 | Primary owner entry containing one or more exact IAT calls |
 | `clear` | 73 | Ordinary-looking code with a `ret` |
 | `clear_msvc` | 49 | MSVC home-space / `sub rsp` prologue |
 | `clear_wrapper_to_obfuscated` | 27 | Clear prologue then `jmp` into protected code |
-| `undecodable` | 85 | Capstone could not decode the sampled head |
+| `undecodable` | 111 | Capstone could not decode the sampled head |
 | `padding` | 5 | Zero / `int3` / `nop` fragments |
 | `obfuscated_blob` | 1 | The 2.73 MiB `.pdata` range RVA `0x1000–0x2BBDC9` |
 
@@ -196,7 +204,7 @@ Every one of those bytes is now named. The taxonomy:
 | `invalid_vex` | 17,335 | `C4`/`C5` that did not form a valid VEX instruction |
 | `invalid_x87` | 9,754 | `D8–DF` x87 encodings Capstone refused here |
 | `invalid_escape` | 1,502 | `0F` two-byte escape not followed by a valid secondary opcode |
-| `invalid_encoding` | 2 | `E2` (LOOP) and `A9` (TEST EAX,imm) rejected at this alignment |
+| `truncated_instruction` | 2 | final-section `E2` (LOOP rel8) and `A9` (TEST EAX,imm32) missing required operands |
 
 Largest fine names: `FF /7` (56,539), `AAD` (25,397), `MOV_imm` (15,766),
 `AAM` (15,293), `FE /7` (12,246), `PUSHA` (10,571). In 32-bit mode many of
@@ -204,10 +212,12 @@ these decode as real instructions (`pusha`, `aad`, `daa`, `lcall`). In 64-bit
 they are `#UD`. That is MBA/junk insertion: legacy opcodes used as non-executing
 noise between real x64 instructions.
 
-Instruction coverage stays 0.9650 because these bytes are not valid 64-bit
-instructions at the linear alignment. **Classified coverage is 1.0000**: every
-executable byte is either a decoded instruction or a named skipdata byte.
-The per-byte listing is `analysis/randgrid-full-map/gaps.tsv.gz`.
+Instruction coverage stays 0.9650 because these bytes are not valid complete
+64-bit instructions at the linear alignment. **Recognized coverage is 1.0000**
+for this input. The classifier now has an explicit `unknown` fallback excluded
+from recognized coverage; labeled coverage is reported separately, so 1.0000 is
+no longer guaranteed by construction. The per-byte listing is
+`analysis/randgrid-full-map-v2/gaps.tsv.gz`.
 
 ---
 
@@ -217,9 +227,12 @@ The per-byte listing is `analysis/randgrid-full-map/gaps.tsv.gz`.
 
 - identity of the analyzed file;
 - every executable section’s linear instruction stream;
-- every remaining skipdata byte named (398,697 / 398,697, classified coverage 1.0);
-- union map of `.pdata`, Ghidra, IAT stubs/calls, and recovered prologue
-  targets (9,109 starts);
+- every remaining skipdata byte labeled, with unknown fallback excluded from
+  semantic recognized coverage;
+- union map of `.pdata`, Ghidra, IAT jump stubs, and recovered prologue targets
+  (8,764 entry candidates);
+- 550 exact IAT call sites separated from entries and assigned to 543 primary
+  owners without double counting;
 - exact PE-entry transfer `0x140C61000 → 0x14059A14C`;
 - named IAT stubs and exact IAT call sites;
 - confirmation of process/thread notify thunks and the object-callback
@@ -248,23 +261,31 @@ for this report.
 python -m venv .venv
 & .\.venv\Scripts\python.exe -m pip install -r .\requirements.txt
 
-# Instruction/function map (requires a lawfully obtained matching driver).
+# Required: export the Ghidra catalog first from the existing analyzed project.
+analyzeHeadless <projectDir> RandgridProject -process Randgrid.sys `
+  -noanalysis -readOnly `
+  -scriptPath .\scripts\ghidra `
+  -postScript GhidraFullFunctionCatalog.java `
+  .\analysis\randgrid-full-map\ghidra-functions-v2.jsonl
+
+# Instruction/entry/call map (requires the exact matching driver and catalog).
 & .\.venv\Scripts\python.exe .\scripts\randgrid_full_map.py `
   --target 'X:\path\to\Randgrid.sys' `
+  --ghidra-catalog .\analysis\randgrid-full-map\ghidra-functions-v2.jsonl `
   --json .\evidence\randgrid-full-map.json `
   --markdown .\evidence\randgrid-full-map.md `
-  --dump-dir .\analysis\randgrid-full-map
+  --dump-dir .\analysis\randgrid-full-map-v2
 
-# Optional: Ghidra catalog from the existing analyzed project (read-only).
-# analyzeHeadless <projectDir> RandgridProject -process Randgrid.sys `
-#   -noanalysis -readOnly `
-#   -scriptPath .\scripts\ghidra `
-#   -postScript GhidraFullFunctionCatalog.java `
-#   .\analysis\randgrid-full-map\ghidra-functions.jsonl
+& .\.venv\Scripts\python.exe .\scripts\randgrid_source_reconstruction.py `
+  --evidence .\evidence\randgrid-full-map.json `
+  --ghidra-catalog .\analysis\randgrid-full-map\ghidra-functions-v2.jsonl `
+  --instructions .\analysis\randgrid-full-map-v2\instructions.tsv.gz `
+  --gaps .\analysis\randgrid-full-map-v2\gaps.tsv.gz
 
 & .\.venv\Scripts\python.exe -m unittest discover -s .\tests -p 'test_*.py' -v
 ```
 
-The generated JSON contains the input hash and no embedded driver bytes. Raw
-binaries, Ghidra databases, and the full instruction listing are not published
-under this repository's MIT license.
+The generated JSON contains the enforced input hash and compact sampled heads;
+it does not contain the complete binary. Raw binaries, Ghidra databases and
+catalogs, and the full instruction/source-like listings are not published under
+this repository's MIT license.

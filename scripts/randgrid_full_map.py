@@ -14,18 +14,21 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import hashlib
+import importlib.metadata
+import io
 import json
+import platform
 import struct
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
+import capstone as capstone_module
 import pefile
-from capstone import CS_ARCH_X86, CS_MODE_64, Cs
-from capstone.x86_const import X86_OP_IMM, X86_OP_MEM, X86_REG_RIP
-
 import randgrid_deep_xrefs as xref
-
+from capstone import CS_ARCH_X86, CS_MODE_64, Cs
+from capstone.x86_const import X86_OP_IMM
 
 SCRIPT_DIRECTORY = Path(__file__).resolve().parent
 ROOT = SCRIPT_DIRECTORY.parent
@@ -33,6 +36,7 @@ DEFAULT_JSON = ROOT / "evidence" / "randgrid-full-map.json"
 DEFAULT_MARKDOWN = ROOT / "evidence" / "randgrid-full-map.md"
 DEFAULT_DUMP = ROOT / "analysis" / "randgrid-full-map"
 EXPECTED_SHA256 = "4150290a810ebebe9f9e6b5bd32c60299f9f34c3d2b6f02b89590ed49a6b895e"
+EXPECTED_SIZE = 13_130_616
 
 # Previously recovered high-confidence labels. Addresses are VAs at image base
 # 0x140000000. These are names, not new behavior claims.
@@ -45,19 +49,36 @@ KNOWN_NAMES: dict[int, str] = {
     0x140A2AC70: "ThreadNotifyThunk",
     0x140A8EDB5: "ThreadNotifyBody",
     0x140AB2C18: "ObRegisterCallbacks_Setup",
-    0x140AB309D: "ObRegisterCallbacks_CallSite",
     0x140AA11D6: "ProcessNotify_RegisterPath",
-    0x140AA12F2: "PsSetCreateProcessNotifyRoutineEx_CallSite",
-    0x140AA130F: "PsSetCreateThreadNotifyRoutine_CallSite",
     0x140A8CD84: "_guard_dispatch_icall",
     0x140AB7BF0: "_guard_check_icall",
+}
+
+KNOWN_CALLSITE_NAMES: dict[int, str] = {
+    0x140AB309D: "ObRegisterCallbacks_CallSite",
+    0x140AA12F2: "PsSetCreateProcessNotifyRoutineEx_CallSite",
+    0x140AA130F: "PsSetCreateThreadNotifyRoutine_CallSite",
 }
 
 MBA_MNEMONICS = frozenset(
     {"push", "pop", "pushfq", "popfq", "add", "sub", "xor", "and", "or", "not", "neg"}
 )
 CLEAR_MNEMONICS = frozenset(
-    {"mov", "lea", "cmp", "test", "call", "ret", "je", "jne", "ja", "jb", "jae", "jbe", "jmp"}
+    {
+        "mov",
+        "lea",
+        "cmp",
+        "test",
+        "call",
+        "ret",
+        "je",
+        "jne",
+        "ja",
+        "jb",
+        "jae",
+        "jbe",
+        "jmp",
+    }
 )
 PROLOGUE_PREFIXES: tuple[bytes, ...] = (
     b"\x40\x53",
@@ -132,7 +153,7 @@ SEG_PREFIX: dict[int, str] = {
 }
 
 
-def classify_gap_byte(value: int, following: bytes) -> tuple[str, str]:
+def classify_gap_byte(value: int, following: bytes) -> tuple[str, str, bool]:
     """Name one linear-skipdata byte from its value and the bytes after it.
 
     A skipdata byte is not missing file content. Capstone refused to start an
@@ -141,64 +162,127 @@ def classify_gap_byte(value: int, following: bytes) -> tuple[str, str]:
     """
 
     if value in LEGACY_UD:
-        return "legacy_ud", LEGACY_UD[value]
+        return "legacy_ud", LEGACY_UD[value], True
     if value == 0xFF:
         if not following:
-            return "invalid_ff", "truncated"
+            return "truncated_instruction", "FF_ModRM", True
         digit = (following[0] >> 3) & 7
         if digit in (3, 5, 7):
-            return "invalid_ff", f"group5_/{digit}"
-        return "invalid_ff", f"rejected_/{digit}"
+            return "invalid_ff", f"group5_/{digit}", True
+        return "invalid_ff", f"rejected_/{digit}", True
     if value == 0xFE:
         if not following:
-            return "invalid_fe", "truncated"
+            return "truncated_instruction", "FE_ModRM", True
         digit = (following[0] >> 3) & 7
         if digit >= 2:
-            return "invalid_fe", f"group4_/{digit}"
-        return "invalid_fe", f"rejected_/{digit}"
+            return "invalid_fe", f"group4_/{digit}", True
+        return "invalid_fe", f"rejected_/{digit}", True
     if value in (0xC4, 0xC5):
-        return "invalid_vex", "C4" if value == 0xC4 else "C5"
+        return "invalid_vex", "C4" if value == 0xC4 else "C5", True
     if 0x40 <= value <= 0x4F:
-        return "orphan_rex", f"REX_{value:02X}"
+        return "orphan_rex", f"REX_{value:02X}", True
     if value == 0xF0:
-        return "invalid_prefix", "LOCK"
+        return "invalid_prefix", "LOCK", True
     if value == 0xF2:
-        return "invalid_prefix", "REPNE"
+        return "invalid_prefix", "REPNE", True
     if value == 0xF3:
-        return "invalid_prefix", "REP"
+        return "invalid_prefix", "REP", True
     if value in SEG_PREFIX:
-        return "invalid_prefix", f"SEG_{SEG_PREFIX[value]}"
+        return "invalid_prefix", f"SEG_{SEG_PREFIX[value]}", True
     if value == 0x66:
-        return "invalid_prefix", "OSIZE"
+        return "invalid_prefix", "OSIZE", True
     if value == 0x67:
-        return "invalid_prefix", "ASIZE"
+        return "invalid_prefix", "ASIZE", True
     if value == 0x0F:
         if not following:
-            return "invalid_escape", "0F_truncated"
-        return "invalid_escape", f"0F_{following[0]:02X}"
+            return "truncated_instruction", "0F_escape", True
+        return "invalid_escape", f"0F_{following[0]:02X}", True
     if value in (0xC6, 0xC7):
-        return "invalid_modrm", "MOV_imm"
+        return "invalid_modrm", "MOV_imm", True
     if value == 0x8F:
-        return "invalid_modrm", "POP_or_XOP"
+        return "invalid_modrm", "POP_or_XOP", True
     if value in (0x8C, 0x8E):
-        return "invalid_modrm", "MOV_Sreg"
+        return "invalid_modrm", "MOV_Sreg", True
     if value == 0x8D:
-        return "invalid_modrm", "LEA"
+        return "invalid_modrm", "LEA", True
     if value in (0x80, 0x81, 0x83):
-        return "invalid_modrm", "ALU_group"
+        return "invalid_modrm", "ALU_group", True
     if value in (0xC0, 0xC1, 0xD0, 0xD1, 0xD2, 0xD3):
-        return "invalid_modrm", "SHIFT_group"
+        return "invalid_modrm", "SHIFT_group", True
     if value in (0xF6, 0xF7):
-        return "invalid_modrm", "UNARY_group"
+        return "invalid_modrm", "UNARY_group", True
     if 0xD8 <= value <= 0xDF:
-        return "invalid_x87", f"x87_{value:02X}"
+        return "invalid_x87", f"x87_{value:02X}", True
     if value in (0xC2, 0xC3, 0xCA, 0xCB, 0xCF):
-        return "invalid_encoding", f"RET_like_{value:02X}"
-    return "invalid_encoding", f"op_{value:02X}"
+        return "invalid_encoding", f"RET_like_{value:02X}", True
+    if value in (0xE0, 0xE1, 0xE2, 0xE3) and len(following) < 1:
+        return "truncated_instruction", f"LOOP_family_{value:02X}_rel8", True
+    if value == 0xA9 and len(following) < 4:
+        return "truncated_instruction", "TEST_EAX_imm32", True
+    return "unknown", f"op_{value:02X}", False
+
+
+def record_gap_run(
+    data: bytes,
+    section_name: str,
+    run_va: int | None,
+    run_off: int,
+    run_len: int,
+    *,
+    run_len_hist: Counter[int],
+    coarse_counts: Counter[str],
+    fine_counts: Counter[str],
+    gap_handle: io.TextIOWrapper | None,
+) -> tuple[int, int]:
+    """Write and classify one completed linear-decode gap run.
+
+    The helper takes the current values explicitly so a per-section callback
+    cannot accidentally retain values from a later loop iteration.
+    """
+
+    if run_va is None or run_len <= 0:
+        return 0, 0
+    raw = data[run_off : run_off + run_len]
+    run_len_hist[run_len] += 1
+    classified_bytes = 0
+    for index, value in enumerate(raw):
+        follow_at = run_off + index + 1
+        following = data[follow_at : follow_at + 16]
+        coarse, fine, recognized = classify_gap_byte(value, following)
+        coarse_counts[coarse] += 1
+        fine_counts[fine] += 1
+        if recognized:
+            classified_bytes += 1
+        if gap_handle is not None:
+            gap_handle.write(
+                f"{run_va + index:x}\t1\t{value:02x}\t{coarse}\t{fine}\t{section_name}\n"
+            )
+    return 1, classified_bytes
 
 
 def hex_value(value: int) -> str:
     return f"0x{value:X}"
+
+
+def open_deterministic_gzip_text(path: Path) -> io.TextIOWrapper:
+    compressed = gzip.GzipFile(filename=str(path), mode="wb", mtime=0)
+    return io.TextIOWrapper(compressed, encoding="utf-8", newline="\n")
+
+
+def verify_target(path: Path) -> dict[str, Any]:
+    """Fail closed unless *path* is the exact pinned Randgrid.sys input."""
+
+    size = path.stat().st_size
+    if size != EXPECTED_SIZE:
+        raise ValueError(
+            f"unexpected Randgrid.sys size: {size} (expected {EXPECTED_SIZE})"
+        )
+    sha256 = xref.file_sha256(path)
+    if sha256 != EXPECTED_SHA256:
+        raise ValueError(
+            f"unexpected Randgrid.sys SHA-256: {sha256} (expected {EXPECTED_SHA256})"
+        )
+    return {"name": path.name, "size": size, "sha256": sha256}
 
 
 def make_disassembler(*, skipdata: bool = False) -> Cs:
@@ -222,7 +306,7 @@ def classify_from_head(insns: list[dict[str, Any]], size: int, raw_head: bytes) 
     if raw_head[:2] == b"\xff\x25":
         return "iat_stub"
     if raw_head[:2] == b"\xff\x15":
-        return "iat_call_thunk"
+        return "iat_call_wrapper"
     if size <= 8 and first == "pop" and "popfq" in mnemonics[:3]:
         return "mba_epilogue"
     if first == "jmp" and raw_head[:2] != b"\xff\x25":
@@ -270,8 +354,8 @@ def name_function(
 ) -> str:
     if va in KNOWN_NAMES:
         return KNOWN_NAMES[va]
-    if classification == "iat_call_thunk" and iat_names:
-        return f"iat_call_{iat_names[0]}"
+    if classification == "iat_call_wrapper" and iat_names:
+        return f"iat_wrapper_{iat_names[0]}"
     if classification == "iat_stub" and iat_stub_name:
         return f"iat_stub_{iat_stub_name}"
     unique = list(dict.fromkeys(iat_names))
@@ -307,7 +391,7 @@ def decode_range(
     rva = va - int(pe.OPTIONAL_HEADER.ImageBase)
     try:
         offset = pe.get_offset_from_rva(rva)
-    except Exception:
+    except (pefile.PEFormatError, TypeError, ValueError, OverflowError):
         return []
     data = bytes(pe.__data__[offset : offset + size])
     md = make_disassembler(skipdata=False)
@@ -350,7 +434,18 @@ def collect_rel_targets(insns: list[dict[str, Any]]) -> list[dict[str, Any]]:
     md = make_disassembler()
     rows: list[dict[str, Any]] = []
     for row in insns:
-        if row["mnemonic"] not in ("call", "jmp", "je", "jne", "ja", "jb", "jae", "jbe", "jg", "jl"):
+        if row["mnemonic"] not in (
+            "call",
+            "jmp",
+            "je",
+            "jne",
+            "ja",
+            "jb",
+            "jae",
+            "jbe",
+            "jg",
+            "jl",
+        ):
             continue
         raw = bytes.fromhex(row["bytes"])
         if not raw:
@@ -360,7 +455,9 @@ def collect_rel_targets(insns: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         op = decoded[0].operands[0]
         if op.type == X86_OP_IMM:
-            rows.append({"from": row["va"], "to": int(op.imm), "mnemonic": row["mnemonic"]})
+            rows.append(
+                {"from": row["va"], "to": int(op.imm), "mnemonic": row["mnemonic"]}
+            )
     return rows
 
 
@@ -378,6 +475,7 @@ def linear_coverage(
     total_insns = 0
     total_decoded = 0
     total_gaps = 0
+    total_classified_gaps = 0
     total_virtual = 0
     mnemonic_counts: Counter[str] = Counter()
     coarse_counts: Counter[str] = Counter()
@@ -390,9 +488,9 @@ def linear_coverage(
     gap_handle = None
     if dump_dir is not None:
         dump_dir.mkdir(parents=True, exist_ok=True)
-        dump_handle = gzip.open(insn_dump_path, "wt", encoding="utf-8")
+        dump_handle = open_deterministic_gzip_text(insn_dump_path)
         dump_handle.write("va\tsize\tbytes\ttext\tsection\n")
-        gap_handle = gzip.open(gap_dump_path, "wt", encoding="utf-8")
+        gap_handle = open_deterministic_gzip_text(gap_dump_path)
         gap_handle.write("va\tsize\tbytes\tcoarse\tfine\tsection\n")
     try:
         for section in xref.executable_sections(pe):
@@ -403,30 +501,11 @@ def linear_coverage(
             total_virtual += virtual_size
             decoded = 0
             gaps = 0
+            classified_gaps = 0
             insns = 0
             run_va: int | None = None
             run_off = 0
             run_len = 0
-
-            def flush_gap() -> None:
-                nonlocal run_va, run_off, run_len, run_count
-                if run_va is None or run_len <= 0:
-                    return
-                raw = data[run_off : run_off + run_len]
-                run_count += 1
-                run_len_hist[run_len] += 1
-                for index, value in enumerate(raw):
-                    follow_at = run_off + index + 1
-                    following = data[follow_at : follow_at + 16]
-                    coarse, fine = classify_gap_byte(value, following)
-                    coarse_counts[coarse] += 1
-                    fine_counts[fine] += 1
-                    if gap_handle is not None:
-                        gap_handle.write(
-                            f"{run_va + index:x}\t1\t{value:02x}\t{coarse}\t{fine}\t{name}\n"
-                        )
-                run_va = None
-                run_len = 0
 
             for insn in md.disasm(data, section_va):
                 offset = insn.address - section_va
@@ -436,12 +515,38 @@ def linear_coverage(
                     if run_va is not None and offset == run_off + run_len:
                         run_len += size
                     else:
-                        flush_gap()
+                        added_runs, added_classified = record_gap_run(
+                            data,
+                            name,
+                            run_va,
+                            run_off,
+                            run_len,
+                            run_len_hist=run_len_hist,
+                            coarse_counts=coarse_counts,
+                            fine_counts=fine_counts,
+                            gap_handle=gap_handle,
+                        )
+                        run_count += added_runs
+                        classified_gaps += added_classified
                         run_va = insn.address
                         run_off = offset
                         run_len = size
                     continue
-                flush_gap()
+                added_runs, added_classified = record_gap_run(
+                    data,
+                    name,
+                    run_va,
+                    run_off,
+                    run_len,
+                    run_len_hist=run_len_hist,
+                    coarse_counts=coarse_counts,
+                    fine_counts=fine_counts,
+                    gap_handle=gap_handle,
+                )
+                run_count += added_runs
+                classified_gaps += added_classified
+                run_va = None
+                run_len = 0
                 insns += 1
                 decoded += insn.size
                 mnemonic_counts[insn.mnemonic] += 1
@@ -463,18 +568,48 @@ def linear_coverage(
                 elif insn.mnemonic == "jmp" and raw[:1] == b"\xe9" and insn.size == 5:
                     disp = struct.unpack_from("<i", raw, 1)[0]
                     rel_jmp_targets.add(insn.address + insn.size + disp)
-            flush_gap()
+            added_runs, added_classified = record_gap_run(
+                data,
+                name,
+                run_va,
+                run_off,
+                run_len,
+                run_len_hist=run_len_hist,
+                coarse_counts=coarse_counts,
+                fine_counts=fine_counts,
+                gap_handle=gap_handle,
+            )
+            run_count += added_runs
+            classified_gaps += added_classified
+            run_va = None
+            run_len = 0
             covered = decoded + gaps
             if covered < virtual_size:
                 run_va = section_va + covered
                 run_off = covered
                 run_len = virtual_size - covered
                 gaps += run_len
-                flush_gap()
+                added_runs, added_classified = record_gap_run(
+                    data,
+                    name,
+                    run_va,
+                    run_off,
+                    run_len,
+                    run_len_hist=run_len_hist,
+                    coarse_counts=coarse_counts,
+                    fine_counts=fine_counts,
+                    gap_handle=gap_handle,
+                )
+                run_count += added_runs
+                classified_gaps += added_classified
+                run_va = None
+                run_len = 0
             total_insns += insns
             total_decoded += decoded
             total_gaps += gaps
-            classified_here = decoded + gaps
+            total_classified_gaps += classified_gaps
+            classified_here = decoded + classified_gaps
+            labeled_here = decoded + gaps
             section_rows.append(
                 {
                     "name": name,
@@ -485,8 +620,16 @@ def linear_coverage(
                     "decoded_bytes": decoded,
                     "gap_bytes": gaps,
                     "classified_bytes": classified_here,
-                    "coverage": round(decoded / virtual_size, 6) if virtual_size else 0.0,
-                    "classified_coverage": round(classified_here / virtual_size, 6) if virtual_size else 0.0,
+                    "labeled_bytes": labeled_here,
+                    "coverage": round(decoded / virtual_size, 6)
+                    if virtual_size
+                    else 0.0,
+                    "classified_coverage": round(classified_here / virtual_size, 6)
+                    if virtual_size
+                    else 0.0,
+                    "labeled_coverage": round(labeled_here / virtual_size, 6)
+                    if virtual_size
+                    else 0.0,
                 }
             )
     finally:
@@ -495,16 +638,23 @@ def linear_coverage(
         if gap_handle is not None:
             gap_handle.close()
 
-    classified_gap = sum(coarse_counts.values())
+    labeled_gap = sum(coarse_counts.values())
+    classified_gap = total_classified_gaps
     unclassified = max(0, total_gaps - classified_gap)
     classified_all = total_decoded + classified_gap
+    labeled_all = total_decoded + labeled_gap
     return {
         "executable_virtual_bytes": total_virtual,
         "instruction_count": total_insns,
         "decoded_bytes": total_decoded,
         "gap_bytes": total_gaps,
         "coverage": round(total_decoded / total_virtual, 6) if total_virtual else 0.0,
-        "classified_coverage": round(classified_all / total_virtual, 6) if total_virtual else 0.0,
+        "classified_coverage": round(classified_all / total_virtual, 6)
+        if total_virtual
+        else 0.0,
+        "labeled_coverage": round(labeled_all / total_virtual, 6)
+        if total_virtual
+        else 0.0,
         "sections": section_rows,
         "mnemonic_top": mnemonic_counts.most_common(40),
         "rel_call_targets": sorted(rel_call_targets),
@@ -515,6 +665,7 @@ def linear_coverage(
         "gaps": {
             "bytes": total_gaps,
             "runs": run_count,
+            "labeled_bytes": labeled_gap,
             "classified_bytes": classified_gap,
             "unclassified_bytes": unclassified,
             "run_len_buckets": {
@@ -546,9 +697,26 @@ def raw_at(pe: pefile.PE, va: int, size: int) -> bytes:
     image_base = int(pe.OPTIONAL_HEADER.ImageBase)
     try:
         offset = pe.get_offset_from_rva(va - image_base)
-    except Exception:
+    except (pefile.PEFormatError, TypeError, ValueError, OverflowError):
         return b""
     return bytes(pe.__data__[offset : offset + size])
+
+
+def entry_authority(source: str) -> tuple[str, str]:
+    sources = set(source.split("+"))
+    if "pe_entry" in sources:
+        return "pe_entry", "high"
+    if "known" in sources:
+        return "known_static_label", "high"
+    if "iat_stub" in sources:
+        return "iat_jump_stub", "high"
+    if "pdata" in sources:
+        return "unwind_entry", "high"
+    if "ghidra" in sources:
+        return "ghidra_function", "medium"
+    if "rel_call_target" in sources:
+        return "heuristic_call_target", "heuristic"
+    return "entry_candidate", "heuristic"
 
 
 def build_function_entry(
@@ -558,8 +726,10 @@ def build_function_entry(
     *,
     source: str,
     pdata: dict[str, int] | None,
-    iat_by_va: dict[int, list[str]],
     stub_name: str | None = None,
+    ghidra_name: str | None = None,
+    ghidra_body_ranges: list[tuple[int, int]] | None = None,
+    ghidra_body_addresses: int | None = None,
     head_limit: int = 16,
     body_insn_limit: int | None = None,
 ) -> dict[str, Any]:
@@ -571,18 +741,14 @@ def build_function_entry(
     classification = classify_from_head(insns, size, raw_head)
     if giant:
         classification = "obfuscated_blob"
-    iat_names = sorted({name for addr, names in iat_by_va.items() if va <= addr < end_va for name in names})
-    if classification in {"unknown", "undecodable", "mba_epilogue"} and iat_names:
-        if size <= 8 and raw_head[:2] == b"\xff\x15":
-            classification = "iat_call_thunk"
-        elif size <= 8 and raw_head[:2] == b"\xff\x25":
-            classification = "iat_stub"
-        elif classification in {"unknown", "undecodable"}:
-            classification = "import_bearing"
+    iat_names: list[str] = []
     thunk_target = first_imm_target(insns, "jmp")
     transfers = collect_rel_targets(insns[:64])
     name = name_function(va, classification, iat_names, thunk_target, stub_name)
+    if va not in KNOWN_NAMES and ghidra_name and not ghidra_name.startswith("FUN_"):
+        name = ghidra_name
     mnemonic_counts = Counter(row["mnemonic"] for row in insns)
+    entry_kind, confidence = entry_authority(source)
     return {
         "name": name,
         "va": va,
@@ -590,10 +756,15 @@ def build_function_entry(
         "end_va": end_va,
         "size": size,
         "source": source,
+        "entry_kind": entry_kind,
+        "entry_confidence": confidence,
         "classification": classification,
         "instruction_count_sampled": len(insns),
-        "instruction_count_is_sample": giant or (body_insn_limit is not None and len(insns) >= (body_insn_limit or 0)),
+        "instruction_count_is_sample": giant
+        or (body_insn_limit is not None and len(insns) >= (body_insn_limit or 0)),
         "iat_imports": iat_names,
+        "iat_call_site_count": 0,
+        "iat_call_sites": [],
         "thunk_target": thunk_target,
         "transfers": transfers[:32],
         "head": [
@@ -602,20 +773,80 @@ def build_function_entry(
         ],
         "mnemonic_top": mnemonic_counts.most_common(8),
         "pdata": pdata,
+        "ghidra_name": ghidra_name,
+        "ghidra_body_ranges": ghidra_body_ranges or [],
+        "ghidra_body_addresses": ghidra_body_addresses,
         "raw_head": raw_head.hex(),
     }
 
 
-def assign_iat_sites(
+def resolve_call_owner(
+    call_va: int,
+    entries: list[dict[str, Any]],
+) -> tuple[dict[str, Any] | None, str | None, int]:
+    """Choose one evidence-backed owner for a static IAT call site."""
+
+    ghidra_candidates = [
+        row
+        for row in entries
+        if any(start <= call_va < end for start, end in row["ghidra_body_ranges"])
+    ]
+    if ghidra_candidates:
+        ghidra_candidates.sort(
+            key=lambda row: (
+                row.get("ghidra_body_addresses")
+                or sum(end - start for start, end in row["ghidra_body_ranges"]),
+                sum(end - start for start, end in row["ghidra_body_ranges"]),
+                row["va"],
+            )
+        )
+        return ghidra_candidates[0], "ghidra_body", len(ghidra_candidates)
+
+    pdata_candidates = []
+    for row in entries:
+        pdata = row.get("pdata")
+        if pdata is None:
+            continue
+        image_base = row["va"] - row["rva"]
+        start = image_base + int(pdata["begin_rva"])
+        end = image_base + int(pdata["end_rva"])
+        if start <= call_va < end:
+            pdata_candidates.append(row)
+    if pdata_candidates:
+        pdata_candidates.sort(key=lambda row: (row["pdata"]["size"], row["va"]))
+        return pdata_candidates[0], "pdata_smallest_range", len(pdata_candidates)
+    return None, None, 0
+
+
+def build_call_sites(
     direct_calls: list[dict[str, Any]],
     stub_calls: list[dict[str, Any]],
-) -> dict[int, list[str]]:
-    by_va: dict[int, list[str]] = defaultdict(list)
-    for row in direct_calls:
-        by_va[int(row["instruction_va"])].append(row["name"])
-    for row in stub_calls:
-        by_va[int(row["instruction_va"])].append(row["name"])
-    return by_va
+    entries: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    call_sites: list[dict[str, Any]] = []
+    for route, rows in (("direct_iat", direct_calls), ("iat_stub", stub_calls)):
+        for row in rows:
+            va = int(row["instruction_va"])
+            owner, basis, candidate_count = resolve_call_owner(va, entries)
+            call_sites.append(
+                {
+                    "name": KNOWN_CALLSITE_NAMES.get(
+                        va, f"{route}_call_{row['name']}_{hex_value(va)}"
+                    ),
+                    "va": va,
+                    "rva": int(row["instruction_rva"]),
+                    "route": route,
+                    "import": row["name"],
+                    "dll": row["dll"],
+                    "instruction": row["instruction"],
+                    "bytes": row["bytes"],
+                    "owner_va": owner["va"] if owner else None,
+                    "owner_name": owner["name"] if owner else None,
+                    "owner_basis": basis,
+                    "owner_candidate_count": candidate_count,
+                }
+            )
+    return sorted(call_sites, key=lambda row: (row["va"], row["import"], row["route"]))
 
 
 def next_boundary(sorted_starts: list[int], va: int, fallback: int) -> int:
@@ -633,18 +864,89 @@ def next_boundary(sorted_starts: list[int], va: int, fallback: int) -> int:
     return fallback
 
 
-def load_ghidra_seeds(path: Path) -> list[dict[str, Any]]:
+def load_ghidra_catalog(
+    path: Path,
+    *,
+    image_base: int,
+    input_sha256: str,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Load and validate the complete private Ghidra authority catalog."""
+
     if not path.is_file():
-        return []
-    rows: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        item = json.loads(line)
-        if item.get("type") != "function" or item.get("external"):
-            continue
-        rows.append(item)
-    return rows
+        raise ValueError(f"required Ghidra catalog does not exist: {path}")
+    raw = path.read_bytes()
+    catalog_sha256 = hashlib.sha256(raw).hexdigest()
+    items = [
+        json.loads(line) for line in raw.decode("utf-8").splitlines() if line.strip()
+    ]
+    if len(items) < 3:
+        raise ValueError("Ghidra catalog is missing its header, functions, or footer")
+    header = items[0]
+    footer = items[-1]
+    if header.get("type") != "header" or footer.get("type") != "footer":
+        raise ValueError(
+            "Ghidra catalog must start with a header and end with a footer"
+        )
+    if header.get("program") != "Randgrid.sys":
+        raise ValueError(f"unexpected Ghidra program: {header.get('program')!r}")
+    header_base = int(str(header.get("image_base")), 16)
+    if header_base != image_base:
+        raise ValueError(
+            f"Ghidra image base {header_base:#x} does not match PE {image_base:#x}"
+        )
+    header_sha = str(header.get("program_sha256") or "").lower()
+    if header_sha != input_sha256:
+        raise ValueError(
+            f"Ghidra program SHA-256 {header_sha!r} does not match the pinned PE"
+        )
+    if footer.get("cancelled"):
+        raise ValueError("Ghidra catalog export was cancelled")
+
+    rows = [item for item in items[1:-1] if item.get("type") == "function"]
+    if len(rows) != len(items) - 2:
+        raise ValueError("Ghidra catalog contains unexpected record types")
+    written = int(footer.get("written_functions", -1))
+    if written != len(rows):
+        raise ValueError(
+            f"Ghidra footer says {written} functions but {len(rows)} records exist"
+        )
+    manager_count = int(header.get("ghidra_function_count", -1))
+    if manager_count < written:
+        raise ValueError(
+            "Ghidra manager function count is smaller than the exported catalog"
+        )
+
+    for item in rows:
+        if item.get("external"):
+            raise ValueError(
+                "external function unexpectedly present in the internal catalog"
+            )
+        ranges = item.get("body_ranges")
+        if not isinstance(ranges, list) or not ranges:
+            raise ValueError(f"Ghidra function {item.get('entry')} has no body_ranges")
+        normalized: list[tuple[int, int]] = []
+        for body_range in ranges:
+            start = int(str(body_range["min"]), 16)
+            end_inclusive = int(str(body_range["max"]), 16)
+            if end_inclusive < start:
+                raise ValueError(f"invalid Ghidra body range for {item.get('entry')}")
+            normalized.append((start, end_inclusive + 1))
+        item["_body_ranges"] = normalized
+
+    provenance = {
+        "file": path.name,
+        "sha256": catalog_sha256,
+        "ghidra_version": header.get("ghidra_version"),
+        "program": header.get("program"),
+        "program_sha256": header_sha,
+        "image_base": header.get("image_base"),
+        "language_id": header.get("language_id"),
+        "compiler_spec_id": header.get("compiler_spec_id"),
+        "manager_function_count": manager_count,
+        "written_functions": written,
+        "cancelled": False,
+    }
+    return rows, provenance
 
 
 def infer_end_va(
@@ -665,12 +967,22 @@ def infer_end_va(
     return min(next_va, int(proposed), va + 0x1000)
 
 
-def build_payload(target: Path, dump_dir: Path | None) -> dict[str, Any]:
+def build_payload(
+    target: Path,
+    dump_dir: Path | None,
+    ghidra_catalog: Path,
+) -> dict[str, Any]:
+    verified_input = verify_target(target)
     pe = pefile.PE(str(target), fast_load=False)
     pe.parse_data_directories()
     image_base = int(pe.OPTIONAL_HEADER.ImageBase)
     entry_rva = int(pe.OPTIONAL_HEADER.AddressOfEntryPoint)
     entry_va = image_base + entry_rva
+    ghidra_rows, ghidra_provenance = load_ghidra_catalog(
+        ghidra_catalog,
+        image_base=image_base,
+        input_sha256=verified_input["sha256"],
+    )
     slots = xref.import_slots(pe)
     pdata_rows = xref.runtime_functions(pe)
     runtime = xref.RuntimeLookup(pdata_rows)
@@ -678,7 +990,6 @@ def build_payload(target: Path, dump_dir: Path | None) -> dict[str, Any]:
     stub_transfers = xref.decoded_transfers_to_iat_stubs(pe, direct, runtime)
     direct_calls = [row for row in direct if row["kind"] == "call"]
     stub_calls = [row for row in stub_transfers if row["kind"] == "call"]
-    iat_by_va = assign_iat_sites(direct_calls, stub_calls)
 
     coverage = linear_coverage(pe, slots, dump_dir)
 
@@ -696,7 +1007,12 @@ def build_payload(target: Path, dump_dir: Path | None) -> dict[str, Any]:
 
     seeds: dict[int, dict[str, Any]] = {}
 
-    def add_seed(va: int, source: str, end_va: int | None = None, extra: dict[str, Any] | None = None) -> None:
+    def add_seed(
+        va: int,
+        source: str,
+        end_va: int | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
         if not in_image(pe, va):
             return
         row = seeds.get(va)
@@ -723,14 +1039,24 @@ def build_payload(target: Path, dump_dir: Path | None) -> dict[str, Any]:
     for va in coverage["rel_call_targets"]:
         if looks_like_entry(raw_at(pe, va, 8)):
             add_seed(va, "rel_call_target")
-    for row in direct_calls:
-        add_seed(int(row["instruction_va"]), "iat_call", int(row["instruction_va"]) + 6)
-    ghidra_path = (dump_dir or DEFAULT_DUMP) / "ghidra-functions.jsonl"
-    ghidra_rows = load_ghidra_seeds(ghidra_path)
     for row in ghidra_rows:
-        entry = int(str(row["entry"]), 16) if isinstance(row["entry"], str) else int(row["entry"])
-        body = int(row.get("body_bytes") or 0)
-        add_seed(entry, "ghidra", entry + body if body else None, {"ghidra_name": row.get("name")})
+        entry = (
+            int(str(row["entry"]), 16)
+            if isinstance(row["entry"], str)
+            else int(row["entry"])
+        )
+        body_ranges = list(row["_body_ranges"])
+        body_end = max(end for _, end in body_ranges)
+        add_seed(
+            entry,
+            "ghidra",
+            body_end,
+            {
+                "ghidra_name": row.get("name"),
+                "ghidra_body_ranges": body_ranges,
+                "ghidra_body_addresses": int(row.get("body_addresses") or 0),
+            },
+        )
 
     starts = sorted(seeds)
     functions: list[dict[str, Any]] = []
@@ -749,16 +1075,61 @@ def build_payload(target: Path, dump_dir: Path | None) -> dict[str, Any]:
                 end_va,
                 source=meta["source"],
                 pdata=meta.get("pdata"),
-                iat_by_va=iat_by_va,
                 stub_name=meta.get("stub_name"),
+                ghidra_name=meta.get("ghidra_name"),
+                ghidra_body_ranges=meta.get("ghidra_body_ranges"),
+                ghidra_body_addresses=meta.get("ghidra_body_addresses"),
             )
         )
 
+    call_sites = build_call_sites(direct_calls, stub_calls, functions)
+    calls_by_owner: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for call_site in call_sites:
+        if call_site["owner_va"] is not None:
+            calls_by_owner[int(call_site["owner_va"])].append(call_site)
+    for row in functions:
+        owned = calls_by_owner.get(row["va"], [])
+        row["iat_call_sites"] = owned
+        row["iat_call_site_count"] = len(owned)
+        row["iat_imports"] = sorted({site["import"] for site in owned})
+        if row["iat_imports"] and row["classification"] in {"unknown", "undecodable"}:
+            row["classification"] = "import_bearing"
+        generic_prefixes = (
+            "unknown_",
+            "undecodable_",
+            "import_bearing_",
+            "clear_",
+            "clear_msvc_",
+            "iat_call_wrapper_",
+        )
+        if (
+            row["iat_imports"]
+            and row["va"] not in KNOWN_NAMES
+            and (
+                row["ghidra_name"] is None
+                or str(row["ghidra_name"]).startswith("FUN_")
+                or row["name"].startswith(generic_prefixes)
+            )
+        ):
+            row["name"] = name_function(
+                row["va"],
+                row["classification"],
+                row["iat_imports"],
+                row["thunk_target"],
+                None,
+            )
+
     class_counts = Counter(row["classification"] for row in functions)
-    source_counts = Counter(row["source"].split("+")[0] for row in functions)
+    source_counts = Counter(
+        source for row in functions for source in row["source"].split("+")
+    )
     named_known = [row for row in functions if row["va"] in KNOWN_NAMES]
     named_iat = [row for row in functions if row["classification"] == "iat_stub"]
-    wrappers = [row for row in functions if row["classification"] == "clear_wrapper_to_obfuscated"]
+    wrappers = [
+        row
+        for row in functions
+        if row["classification"] == "clear_wrapper_to_obfuscated"
+    ]
     with_imports = [row for row in functions if row["iat_imports"]]
 
     entry_follow = first_imm_target(decode_range(pe, entry_va, 16), "jmp")
@@ -771,9 +1142,15 @@ def build_payload(target: Path, dump_dir: Path | None) -> dict[str, Any]:
             "end_va": hex_value(row["end_va"]),
             "size": row["size"],
             "source": row["source"],
+            "entry_kind": row["entry_kind"],
+            "entry_confidence": row["entry_confidence"],
             "classification": row["classification"],
             "iat_imports": row["iat_imports"],
-            "thunk_target": hex_value(row["thunk_target"]) if row["thunk_target"] else None,
+            "iat_call_site_count": row["iat_call_site_count"],
+            "ghidra_name": row["ghidra_name"],
+            "thunk_target": hex_value(row["thunk_target"])
+            if row["thunk_target"]
+            else None,
             "instruction_count_sampled": row["instruction_count_sampled"],
             "instruction_count_is_sample": row["instruction_count_is_sample"],
         }
@@ -783,7 +1160,7 @@ def build_payload(target: Path, dump_dir: Path | None) -> dict[str, Any]:
         return item
 
     dump_functions = [compact_row(row, include_head=True) for row in functions]
-    publish_functions = []
+    publish_entries = []
     for row in functions:
         interesting = (
             row["va"] in KNOWN_NAMES
@@ -800,20 +1177,46 @@ def build_payload(target: Path, dump_dir: Path | None) -> dict[str, Any]:
             or "known" in row["source"]
             or "pe_entry" in row["source"]
         )
-        publish_functions.append(compact_row(row, include_head=interesting))
+        publish_entries.append(compact_row(row, include_head=interesting))
+
+    compact_call_sites = [
+        {
+            **{
+                key: value
+                for key, value in row.items()
+                if key not in {"va", "rva", "owner_va"}
+            },
+            "va": hex_value(row["va"]),
+            "rva": hex_value(row["rva"]),
+            "owner_va": hex_value(row["owner_va"])
+            if row["owner_va"] is not None
+            else None,
+        }
+        for row in call_sites
+    ]
 
     if dump_dir is not None:
         dump_dir.mkdir(parents=True, exist_ok=True)
-        (dump_dir / "functions.json").write_text(
+        (dump_dir / "entries.json").write_text(
             json.dumps(dump_functions, indent=2), encoding="utf-8", newline="\n"
         )
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
+        "authority": {
+            "pinned_input_enforced": True,
+            "ghidra_catalog": ghidra_provenance,
+            "toolchain": {
+                "python": platform.python_version(),
+                "capstone_distribution": importlib.metadata.version("capstone"),
+                "capstone_module": getattr(capstone_module, "__version__", None),
+                "capstone_engine": list(capstone_module.cs_version()),
+                "pefile_distribution": importlib.metadata.version("pefile"),
+                "pefile_module": getattr(pefile, "__version__", None),
+            },
+        },
         "input": {
-            "name": target.name,
-            "size": target.stat().st_size,
-            "sha256": xref.file_sha256(target),
+            **verified_input,
             "image_base": image_base,
             "entry_rva": entry_rva,
             "entry_va": entry_va,
@@ -826,6 +1229,7 @@ def build_payload(target: Path, dump_dir: Path | None) -> dict[str, Any]:
             "gap_bytes": coverage["gap_bytes"],
             "coverage": coverage["coverage"],
             "classified_coverage": coverage.get("classified_coverage"),
+            "labeled_coverage": coverage.get("labeled_coverage"),
             "sections": coverage["sections"],
             "mnemonic_top": coverage["mnemonic_top"],
             "instruction_dump": coverage["instruction_dump"],
@@ -839,7 +1243,7 @@ def build_payload(target: Path, dump_dir: Path | None) -> dict[str, Any]:
             "rel_jmp_targets": len(coverage["rel_jmp_targets"]),
             "known": len(KNOWN_NAMES),
             "ghidra_catalog": len(ghidra_rows),
-            "unique_function_starts": len(functions),
+            "unique_entry_candidates": len(functions),
         },
         "classification_counts": dict(sorted(class_counts.items())),
         "source_counts": dict(sorted(source_counts.items())),
@@ -847,10 +1251,26 @@ def build_payload(target: Path, dump_dir: Path | None) -> dict[str, Any]:
             "slot_count": len(slots),
             "direct_call_count": len(direct_calls),
             "stub_call_count": len(stub_calls),
-            "functions_with_exact_iat_calls": len(with_imports),
+            "unique_call_site_count": len(call_sites),
+            "owned_call_site_count": sum(
+                row["owner_va"] is not None for row in call_sites
+            ),
+            "unresolved_call_site_count": sum(
+                row["owner_va"] is None for row in call_sites
+            ),
+            "entries_with_owned_iat_calls": len(with_imports),
+            "call_sites_with_multiple_owner_candidates": sum(
+                row["owner_candidate_count"] > 1 for row in call_sites
+            ),
         },
+        "call_sites": compact_call_sites,
         "named_known": [
-            {"name": row["name"], "va": hex_value(row["va"]), "classification": row["classification"], "size": row["size"]}
+            {
+                "name": row["name"],
+                "va": hex_value(row["va"]),
+                "classification": row["classification"],
+                "size": row["size"],
+            }
             for row in named_known
         ],
         "iat_stub_count": len(named_iat),
@@ -868,12 +1288,13 @@ def build_payload(target: Path, dump_dir: Path | None) -> dict[str, Any]:
             ),
             key=lambda row: (-row["size"], row["va"]),
         )[:30],
-        "functions": publish_functions,
+        "entries": publish_entries,
         "interpretation": {
             "coverage": (
                 "Instruction coverage is a linear Capstone sweep of every executable section. "
-                "The remaining skipdata bytes are classified individually as 64-bit #UD encodings, "
-                "invalid prefixes/VEX/ModR/M, or other rejected opcodes at that alignment."
+                "Recognized skipdata bytes are classified individually as 64-bit #UD encodings, "
+                "invalid prefixes/VEX/ModR/M, truncated instructions, or other rejected opcodes. "
+                "Unknown fallback labels are excluded from semantic classified coverage."
             ),
             "gaps": (
                 "A skipdata byte is present in the file. It is not a missing region. Capstone "
@@ -885,8 +1306,14 @@ def build_payload(target: Path, dump_dir: Path | None) -> dict[str, Any]:
                 "are MBA epilogue fragments or obfuscated blocks, not conventional compiler functions."
             ),
             "ghidra": (
-                "Ghidra's 8,178 labels are a second, overlapping catalog. Linear Capstone recovers "
-                "far more instructions inside flattened/MBA regions than Ghidra auto-analysis kept."
+                f"The validated Ghidra catalog contributes {len(ghidra_rows)} internal entry "
+                "candidates and is hash-pinned in authority metadata. Entries can overlap because "
+                "Ghidra bodies, unwind ranges, and linkage stubs are distinct authority surfaces."
+            ),
+            "calls": (
+                "IAT call instructions are call sites, never function seeds. Each call receives at "
+                "most one primary owner: the smallest exact Ghidra body first, otherwise the "
+                "smallest containing .pdata range, otherwise unresolved."
             ),
             "non_claim": (
                 "A mapped instruction or named wrapper is static recovery, not runtime policy, "
@@ -900,22 +1327,49 @@ def write_markdown(payload: dict[str, Any], output: Path) -> None:
     source = payload["input"]
     coverage = payload["coverage"]
     lines = [
-        "# Randgrid.sys — complete static function map",
+        "# Randgrid.sys — static entry and call-site map",
         "",
         f"- SHA-256: `{source['sha256']}`",
         f"- Size: `{source['size']}` bytes",
         f"- Image base: `{hex_value(source['image_base'])}`",
         f"- PE entry: `{hex_value(source['entry_va'])}`",
         f"- Entry follows: `{hex_value(source['entry_follows']) if source.get('entry_follows') else 'unresolved'}`",
-        f"- Unique mapped starts: `{payload['seeds']['unique_function_starts']}`",
+        f"- Unique entry candidates: `{payload['seeds']['unique_entry_candidates']}`",
         f"- `.pdata` ranges: `{payload['seeds']['pdata']}`",
         f"- IAT stubs: `{payload['seeds']['iat_stubs']}`",
         f"- Relative-call targets: `{payload['seeds']['rel_call_targets']}`",
         f"- Linear instructions: `{coverage['instruction_count']}`",
-        f"- Decoded executable bytes: `{coverage['decoded_bytes']}` / `{coverage['executable_virtual_bytes']}` "
-        f"(`{coverage['coverage']:.4f}`)",
-        f"- Classified executable bytes: `{coverage.get('classified_coverage', coverage['coverage']):.4f}` "
-        f"(instruction + named skipdata)",
+        (
+            f"- Decoded executable bytes: `{coverage['decoded_bytes']}` / "
+            f"`{coverage['executable_virtual_bytes']}` (`{coverage['coverage']:.4f}`)"
+        ),
+        (
+            "- Recognized executable-byte coverage: "
+            f"`{coverage.get('classified_coverage', coverage['coverage']):.4f}`"
+        ),
+        (
+            "- Labeled executable-byte coverage: "
+            f"`{coverage.get('labeled_coverage', coverage['coverage']):.4f}`"
+        ),
+        (
+            f"- Exact IAT call sites: `{payload['imports']['unique_call_site_count']}` "
+            f"(`{payload['imports']['owned_call_site_count']}` owned, "
+            f"`{payload['imports']['unresolved_call_site_count']}` unresolved)"
+        ),
+        f"- Entries owning exact IAT calls: `{payload['imports']['entries_with_owned_iat_calls']}`",
+        "",
+        "## Authority inputs",
+        "",
+        f"- Pinned input enforced: `{payload['authority']['pinned_input_enforced']}`",
+        (
+            "- Ghidra catalog SHA-256: "
+            f"`{payload['authority']['ghidra_catalog']['sha256']}`"
+        ),
+        f"- Ghidra version: `{payload['authority']['ghidra_catalog']['ghidra_version']}`",
+        (
+            "- Ghidra internal functions: "
+            f"`{payload['authority']['ghidra_catalog']['written_functions']}`"
+        ),
         "",
         "## Section coverage",
         "",
@@ -936,14 +1390,17 @@ def write_markdown(payload: dict[str, Any], output: Path) -> None:
                 "## Skipdata remainder (former 3.5%)",
                 "",
                 f"- Gap bytes: `{gaps.get('bytes', 0)}` in `{gaps.get('runs', 0)}` runs",
-                f"- Classified: `{gaps.get('classified_bytes', 0)}`",
-                f"- Unclassified: `{gaps.get('unclassified_bytes', 0)}`",
+                f"- Labeled: `{gaps.get('labeled_bytes', 0)}`",
+                f"- Semantically recognized: `{gaps.get('classified_bytes', 0)}`",
+                f"- Unknown fallback: `{gaps.get('unclassified_bytes', 0)}`",
                 f"- Run lengths: `{gaps.get('run_len_buckets', {})}`",
                 "",
-                "These bytes are in the file. They are not missing code. Linear x64 decode "
-                "refuses to start an instruction here (legacy 16/32-bit opcodes, invalid "
-                "VEX/LOCK/REX prefixes, rejected ModR/M groups). The next instruction in "
-                "the sweep begins immediately after each run.",
+                (
+                    "These bytes are in the file. They are not missing code. Linear x64 decode "
+                    "refuses to start an instruction here (legacy 16/32-bit opcodes, invalid "
+                    "VEX/LOCK/REX prefixes, rejected ModR/M groups). The next instruction in "
+                    "the sweep begins immediately after each run."
+                ),
                 "",
                 "| Gap class | Bytes |",
                 "|---|---:|",
@@ -957,7 +1414,7 @@ def write_markdown(payload: dict[str, Any], output: Path) -> None:
     lines.extend(
         [
             "",
-            "## Classification",
+            "## Entry classification",
             "",
             "| Class | Count |",
             "|---|---:|",
@@ -965,7 +1422,15 @@ def write_markdown(payload: dict[str, Any], output: Path) -> None:
     )
     for name, count in payload["classification_counts"].items():
         lines.append(f"| `{name}` | {count} |")
-    lines.extend(["", "## Known labels recovered", "", "| Name | VA | Class | Size |", "|---|---|---|---:|"])
+    lines.extend(
+        [
+            "",
+            "## Known labels recovered",
+            "",
+            "| Name | VA | Class | Size |",
+            "|---|---|---|---:|",
+        ]
+    )
     for row in payload["named_known"]:
         lines.append(
             f"| `{row['name']}` | `{row['va']}` | `{row['classification']}` | {row['size']} |"
@@ -1003,10 +1468,14 @@ def write_markdown(payload: dict[str, Any], output: Path) -> None:
             payload["interpretation"].get("gaps", ""),
             payload["interpretation"]["pdata"],
             payload["interpretation"]["ghidra"],
+            payload["interpretation"]["calls"],
             payload["interpretation"]["non_claim"],
             "",
-            "The JSON companion lists every mapped start with a sampled instruction head. "
-            "The Git-ignored analysis dump contains the full linear instruction stream.",
+            (
+                "The JSON companion lists every entry candidate and exact IAT call site with "
+                "deterministic primary ownership. The Git-ignored analysis dump contains the "
+                "full linear instruction stream."
+            ),
             "",
         ]
     )
@@ -1017,6 +1486,12 @@ def write_markdown(payload: dict[str, Any], output: Path) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target", type=Path, required=True)
+    parser.add_argument(
+        "--ghidra-catalog",
+        type=Path,
+        required=True,
+        help="validated GhidraFullFunctionCatalog JSONL authority input",
+    )
     parser.add_argument("--json", type=Path, default=DEFAULT_JSON)
     parser.add_argument("--markdown", type=Path, default=DEFAULT_MARKDOWN)
     parser.add_argument("--dump-dir", type=Path, default=DEFAULT_DUMP)
@@ -1028,19 +1503,28 @@ def main() -> None:
     args = parse_args()
     if not args.target.is_file():
         raise SystemExit(f"target does not exist: {args.target}")
+    if not args.ghidra_catalog.is_file():
+        raise SystemExit(f"Ghidra catalog does not exist: {args.ghidra_catalog}")
+    try:
+        verify_target(args.target)
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
     dump_dir = None if args.no_dump else args.dump_dir
-    payload = build_payload(args.target, dump_dir)
+    payload = build_payload(args.target, dump_dir, args.ghidra_catalog)
     args.json.parent.mkdir(parents=True, exist_ok=True)
     # Published evidence omits the full per-function head list when huge; keep it.
     args.json.write_text(json.dumps(payload, indent=2), encoding="utf-8", newline="\n")
     write_markdown(payload, args.markdown)
     print(f"input sha256: {payload['input']['sha256']}")
-    print(f"functions: {payload['seeds']['unique_function_starts']}")
+    print(f"entry candidates: {payload['seeds']['unique_entry_candidates']}")
+    print(f"IAT call sites: {payload['imports']['unique_call_site_count']}")
     print(f"instructions: {payload['coverage']['instruction_count']}")
     print(f"coverage: {payload['coverage']['coverage']}")
     print(f"classified: {payload['coverage'].get('classified_coverage')}")
     gaps = payload["coverage"].get("gaps") or {}
-    print(f"gaps: {gaps.get('bytes')} unclassified={gaps.get('unclassified_bytes')} classes={gaps.get('classes')}")
+    print(
+        f"gaps: {gaps.get('bytes')} unclassified={gaps.get('unclassified_bytes')} classes={gaps.get('classes')}"
+    )
     print(f"classes: {payload['classification_counts']}")
     print(f"wrote {args.json}")
     print(f"wrote {args.markdown}")
