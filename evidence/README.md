@@ -1,5 +1,14 @@
 # Evidence artifacts
 
+`randgrid-full-map.json` and its Markdown rendering are deterministic outputs of
+`scripts/randgrid_full_map.py` for the same driver. They catalog every recovered
+function start (`.pdata`, Ghidra, IAT stubs/calls, prologue-like call targets)
+and the linear executable-byte coverage, including a named taxonomy of every
+Capstone skipdata byte (classified coverage 1.0). They do not embed instruction
+bytes for every mapped body; the full instruction listing is the Git-ignored
+`analysis/randgrid-full-map/instructions.tsv.gz` and the per-byte skipdata
+listing is `analysis/randgrid-full-map/gaps.tsv.gz`.
+
 `randgrid-deep-xrefs.json` and its Markdown rendering are deterministic outputs
 of `scripts/randgrid_deep_xrefs.py` for the driver identified by SHA-256
 `4150290A810EBEBE9F9E6B5BD32C60299F9F34C3D2B6F02B89590ED49A6B895E`.

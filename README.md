@@ -24,8 +24,13 @@ The analyzed driver has SHA-256:
 | Imports with an exact supported call form | 61 |
 | Exact direct-IAT calls | 527 |
 | Exact calls through local IAT stubs | 23 |
+| Linear Capstone instructions | 3,478,904 |
+| Executable-byte instruction coverage | 10,983,063 / 11,381,760 (0.9650) |
+| Skipdata remainder classified | 398,697 / 398,697 (classified coverage 1.0000) |
+| Unique mapped function starts | 9,109 |
 | Exception-directory runtime functions | 2,191 |
 | Largest unwind range | `0x2BADC9` bytes (about 2.73 MiB) |
+| PE entry | `0x140C61000` `jmp 0x14059A14C` (MBA body) |
 | `MmCopyMemory` calls | 18 |
 | Process callback | thunk `0x140A294E0`, registered with `Remove = FALSE` |
 | Thread callback | thunk `0x140A2AC70`; create-path system-thread/start-address inspection |
@@ -40,10 +45,16 @@ The analyzed driver has SHA-256:
 | Universal literal handle hiding | contradicted by direct runtime evidence |
 | Selective handle-access reduction | exact `0x410` request → stored `0x1000`, reproduced non-admin and elevated |
 
-The authoritative narrative is
+The authoritative IAT/unwind narrative is
 [`docs/07-randgrid-deep-dive.md`](docs/07-randgrid-deep-dive.md). It explicitly
 separates import presence, linkage stubs, exact call sites, high-confidence
 inferences, and unresolved behavior.
+
+The complete instruction and function-start map is
+[`docs/09-randgrid-full-function-map.md`](docs/09-randgrid-full-function-map.md).
+It linearly disassembles every executable byte, merges `.pdata`, Ghidra, IAT
+stubs/calls, and recovered prologues into 9,109 named starts, and keeps the
+full instruction listing Git-ignored under `analysis/randgrid-full-map/`.
 
 The bounded runtime follow-up is
 [`docs/08-randgrid-runtime-behavior.md`](docs/08-randgrid-runtime-behavior.md).
@@ -97,6 +108,12 @@ python -m venv .venv
   --json .\evidence\randgrid-deep-xrefs.json `
   --markdown .\evidence\randgrid-deep-xrefs.md
 
+& .\.venv\Scripts\python.exe .\scripts\randgrid_full_map.py `
+  --target 'X:\path\to\Randgrid.sys' `
+  --json .\evidence\randgrid-full-map.json `
+  --markdown .\evidence\randgrid-full-map.md `
+  --dump-dir .\analysis\randgrid-full-map
+
 & .\.venv\Scripts\python.exe -m unittest discover `
   -s .\tests -p 'test_*.py' -v
 ```
@@ -128,6 +145,8 @@ is also not use evidence until a caller to that stub is recovered.
   Randgrid deep dive, and the live-capture report (doc 08).
 - [`scripts/randgrid_deep_xrefs.py`](scripts/randgrid_deep_xrefs.py) — tested,
   deterministic PE/IAT/stub/unwind analyzer.
+- [`scripts/randgrid_full_map.py`](scripts/randgrid_full_map.py) — complete
+  linear instruction sweep and merged function-start catalog.
 - [`scripts/live_capture.py`](scripts/live_capture.py) — tiered live-capture
   research probe (pure `ctypes`): observe / probe / memory-trap / optional
   injection; raw output is local-only by default.
